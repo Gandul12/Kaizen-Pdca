@@ -103,7 +103,7 @@ export const Step4Editor: React.FC<Step4EditorProps> = ({ data, onChange }) => {
       if (json.success) {
         onChange({
           ...data,
-          fishboneImage: json.dataUrl,
+          fishboneImage: json.fileUrl,
         });
       }
     } catch (err) {

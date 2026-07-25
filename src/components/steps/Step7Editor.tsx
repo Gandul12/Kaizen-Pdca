@@ -98,7 +98,7 @@ export const Step7Editor: React.FC<Step7EditorProps> = ({ data, onChange }) => {
       if (json.success) {
         onChange({
           ...data,
-          chartImage: json.dataUrl,
+          chartImage: json.fileUrl,
         });
       }
     } catch (err) {

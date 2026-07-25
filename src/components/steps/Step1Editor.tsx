@@ -40,7 +40,7 @@ export const Step1Editor: React.FC<Step1EditorProps> = ({ data, onChange }) => {
           ...(data.images || []),
           {
             id: "img-" + Date.now(),
-            url: json.dataUrl,
+            url: json.fileUrl,
             caption: file.name,
           },
         ];

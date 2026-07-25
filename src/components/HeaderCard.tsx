@@ -22,7 +22,7 @@ export const HeaderCard: React.FC<HeaderCardProps> = ({
     });
   };
 
-  const statusOptions: ProjectStatus[] = ["Draft", "On Progress", "Under Review", "Completed"];
+  const statusOptions: ProjectStatus[] = ["Draft", "On Progress", "Under Review", "Completed", "Rejected"];
 
   const getStatusBadgeClass = (s: ProjectStatus) => {
     switch (s) {
@@ -32,6 +32,8 @@ export const HeaderCard: React.FC<HeaderCardProps> = ({
         return "bg-blue-100 text-blue-800 border-blue-300";
       case "Under Review":
         return "bg-amber-100 text-amber-800 border-amber-300";
+      case "Rejected":
+        return "bg-rose-100 text-rose-800 border-rose-300";
       default:
         return "bg-slate-100 text-slate-800 border-slate-300";
     }

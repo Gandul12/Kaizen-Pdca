@@ -14,20 +14,32 @@ import {
 } from "docx";
 import { KaizenProject } from "@/types/kaizen";
 
-function base64ToBuffer(dataUrl: string): { buffer: Buffer; extension: string } | null {
+async function imageUrlToBuffer(url: string): Promise<{ buffer: Uint8Array; extension: string } | null> {
   try {
-    const parts = dataUrl.split(",");
-    if (parts.length < 2) return null;
-    const header = parts[0];
-    const base64Data = parts[1];
-    let extension = "png";
-    if (header.includes("jpeg") || header.includes("jpg")) {
-      extension = "jpg";
+    if (!url) return null;
+
+    // Handle base64 data URLs (legacy)
+    if (url.startsWith("data:")) {
+      const parts = url.split(",");
+      if (parts.length < 2) return null;
+      const header = parts[0];
+      const base64Data = parts[1];
+      let extension = "png";
+      if (header.includes("jpeg") || header.includes("jpg")) extension = "jpg";
+      const binary = atob(base64Data);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return { buffer: bytes, extension };
     }
-    return {
-      buffer: Buffer.from(base64Data, "base64"),
-      extension,
-    };
+
+    // Handle file URLs (/uploads/xxx.png)
+    const fullUrl = url.startsWith("http") ? url : `${typeof window !== "undefined" ? window.location.origin : ""}${url}`;
+    const resp = await fetch(fullUrl);
+    if (!resp.ok) return null;
+    const arrayBuf = await resp.arrayBuffer();
+    const ext = url.split(".").pop()?.toLowerCase() || "png";
+    const extension = (ext === "jpg" || ext === "jpeg") ? "jpg" : "png";
+    return { buffer: new Uint8Array(arrayBuf), extension };
   } catch (e) {
     return null;
   }
@@ -181,7 +193,7 @@ export async function generateKaizenDocx(project: KaizenProject): Promise<Blob> 
 
   if (s1?.images && s1.images.length > 0) {
     for (const img of s1.images) {
-      const res = base64ToBuffer(img.url);
+      const res = await imageUrlToBuffer(img.url);
       if (res) {
         children.push(
           new Paragraph({
@@ -380,7 +392,7 @@ export async function generateKaizenDocx(project: KaizenProject): Promise<Blob> 
   children.push(fbTable);
 
   if (s4?.fishboneImage) {
-    const res = base64ToBuffer(s4.fishboneImage);
+    const res = await imageUrlToBuffer(s4.fishboneImage);
     if (res) {
       children.push(
         new Paragraph({
@@ -551,7 +563,7 @@ export async function generateKaizenDocx(project: KaizenProject): Promise<Blob> 
   }
 
   if (s7?.chartImage) {
-    const res = base64ToBuffer(s7.chartImage);
+    const res = await imageUrlToBuffer(s7.chartImage);
     if (res) {
       children.push(
         new Paragraph({
@@ -640,7 +652,7 @@ export async function generateKaizenDocx(project: KaizenProject): Promise<Blob> 
   children.push(createLabelValueRow("Kondisi Sesudah Standardisasi", s8?.afterCondition || ""));
 
   if (s8?.beforeUrl) {
-    const res = base64ToBuffer(s8.beforeUrl);
+    const res = await imageUrlToBuffer(s8.beforeUrl);
     if (res) {
       children.push(new Paragraph({ children: [new TextRun({ text: "Foto Sebelum:", bold: true })], spacing: { before: 60 } }));
       children.push(
@@ -658,7 +670,7 @@ export async function generateKaizenDocx(project: KaizenProject): Promise<Blob> 
   }
 
   if (s8?.afterUrl) {
-    const res = base64ToBuffer(s8.afterUrl);
+    const res = await imageUrlToBuffer(s8.afterUrl);
     if (res) {
       children.push(new Paragraph({ children: [new TextRun({ text: "Foto Sesudah:", bold: true })], spacing: { before: 60 } }));
       children.push(

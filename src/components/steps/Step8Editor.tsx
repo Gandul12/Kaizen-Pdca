@@ -85,9 +85,9 @@ export const Step8Editor: React.FC<Step8EditorProps> = ({ data, onChange }) => {
       const json = await res.json();
       if (json.success) {
         if (type === "before") {
-          onChange({ ...data, beforeUrl: json.dataUrl });
+          onChange({ ...data, beforeUrl: json.fileUrl });
         } else {
-          onChange({ ...data, afterUrl: json.dataUrl });
+          onChange({ ...data, afterUrl: json.fileUrl });
         }
       }
     } catch (err) {
@@ -118,7 +118,7 @@ export const Step8Editor: React.FC<Step8EditorProps> = ({ data, onChange }) => {
         const newItem: AttachmentItem = {
           id: "att-" + Date.now(),
           fileName: file.name,
-          fileUrl: json.dataUrl,
+          fileUrl: json.fileUrl,
           fileType: file.type,
         };
         onChange({

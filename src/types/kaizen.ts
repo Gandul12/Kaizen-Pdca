@@ -1,4 +1,4 @@
-export type ProjectStatus = "Draft" | "On Progress" | "Under Review" | "Completed";
+export type ProjectStatus = "Draft" | "On Progress" | "Under Review" | "Completed" | "Rejected";
 
 export interface HeaderData {
   title: string;
@@ -93,7 +93,7 @@ export interface ActionPlanRow {
   area: string;
   pic: string;
   targetDate: string;
-  progress: number; // 0 to 100
+  progress: number;
 }
 
 export interface Step5And6Data {
@@ -109,11 +109,7 @@ export interface FollowUpChartPoint {
   after: number;
 }
 
-export type FollowUpDecision =
-  | "proliferasi"
-  | "monitoring"
-  | "pdca_ulang"
-  | "eskalasi";
+export type FollowUpDecision = "proliferasi" | "monitoring" | "pdca_ulang" | "eskalasi";
 
 export interface Step7Data {
   checkMethod: string;
@@ -130,7 +126,7 @@ export interface DocumentRow {
   id: string;
   docNumber: string;
   docName: string;
-  status: string; // e.g., "Baru", "Revisi", "Dihentikan"
+  status: string;
 }
 
 export interface AttachmentItem {
@@ -173,128 +169,95 @@ export interface KaizenProject {
   status: ProjectStatus;
   currentStep: number;
   content: KaizenContent;
+  isTemplate?: number;
+  templateName?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
 
+// Step validation
+export interface StepValidation {
+  step: number;
+  label: string;
+  isComplete: boolean;
+  errors: string[];
+}
+
+export function validateSteps(content: KaizenContent): StepValidation[] {
+  const s = content;
+  return [
+    {
+      step: 1, label: "Problem Situation",
+      isComplete: !!(s.step1?.standard && s.step1?.currentSituation && s.step1?.gap),
+      errors: [
+        ...(s.step1?.standard ? [] : ["Standar belum diisi"]),
+        ...(s.step1?.currentSituation ? [] : ["Situasi terkini belum diisi"]),
+        ...(s.step1?.gap ? [] : ["Gap belum diisi"]),
+      ],
+    },
+    {
+      step: 2, label: "Break Down Problem",
+      isComplete: !!(s.step2?.fourWOneH?.what && s.step2?.fourWOneH?.where),
+      errors: [
+        ...(s.step2?.fourWOneH?.what ? [] : ["WHAT belum diisi"]),
+        ...(s.step2?.fourWOneH?.where ? [] : ["WHERE belum diisi"]),
+      ],
+    },
+    {
+      step: 3, label: "Target Setting",
+      isComplete: !!(s.step3?.smart?.specific && s.step3?.smart?.measurable && s.step3?.projectTheme),
+      errors: [
+        ...(s.step3?.smart?.specific ? [] : ["Specific belum diisi"]),
+        ...(s.step3?.smart?.measurable ? [] : ["Measurable belum diisi"]),
+        ...(s.step3?.projectTheme ? [] : ["Tema proyek belum diisi"]),
+      ],
+    },
+    {
+      step: 4, label: "Cause Analysis",
+      isComplete: !!(s.step4?.fiveWhys?.rootCause),
+      errors: [...(s.step4?.fiveWhys?.rootCause ? [] : ["Root cause belum diisi"])],
+    },
+    {
+      step: 5, label: "Countermeasure",
+      isComplete: !!(s.step5_6?.actionPlans?.some((a) => a.plan)),
+      errors: [...(s.step5_6?.actionPlans?.some((a) => a.plan) ? [] : ["Minimal 1 action plan harus diisi"])],
+    },
+    {
+      step: 6, label: "Follow Up",
+      isComplete: !!(s.step7?.testResultSummary),
+      errors: [...(s.step7?.testResultSummary ? [] : ["Ringkasan hasil belum diisi"])],
+    },
+    {
+      step: 7, label: "Standardization",
+      isComplete: !!(s.step8?.documentsCreated?.some((d) => d.docName)),
+      errors: [...(s.step8?.documentsCreated?.some((d) => d.docName) ? [] : ["Minimal 1 dokumen harus diisi"])],
+    },
+  ];
+}
+
 export const EMPTY_KAIZEN_CONTENT: KaizenContent = {
-  header: {
-    title: "",
-    department: "",
-    leader: "",
-    teamMembers: "",
-    startDate: "",
-    dueDate: "",
-    status: "Draft",
-  },
-  step1: {
-    standard: "",
-    currentSituation: "",
-    gap: "",
-    sinceWhen: "",
-    impact: "",
-    images: [],
-  },
+  header: { title: "", department: "", leader: "", teamMembers: "", startDate: "", dueDate: "", status: "Draft" },
+  step1: { standard: "", currentSituation: "", gap: "", sinceWhen: "", impact: "", images: [] },
   step2: {
-    fourWOneH: {
-      what: "",
-      when: "",
-      where: "",
-      who: "",
-    },
-    supportingData: [
-      {
-        id: "s1",
-        area: "",
-        eventDate: "",
-        category: "",
-        detailModel: "",
-        quantity: "",
-      },
-    ],
+    fourWOneH: { what: "", when: "", where: "", who: "" },
+    supportingData: [{ id: "s1", area: "", eventDate: "", category: "", detailModel: "", quantity: "" }],
   },
-  step3: {
-    smart: {
-      specific: "",
-      measurable: "",
-      achievable: "",
-      relevant: "",
-      timeBased: "",
-    },
-    improvement: "",
-    targetValue: "",
-    completionDate: "",
-    projectTheme: "",
-  },
+  step3: { smart: { specific: "", measurable: "", achievable: "", relevant: "", timeBased: "" }, improvement: "", targetValue: "", completionDate: "", projectTheme: "" },
   step4: {
-    fishbone: {
-      man: "",
-      machine: "",
-      method: "",
-      material: "",
-      environment: "",
-    },
+    fishbone: { man: "", machine: "", method: "", material: "", environment: "" },
     fishboneImage: "",
-    mostPotentialCauses: [
-      {
-        id: "p1",
-        cause: "",
-        checkMethod: "",
-        result: "",
-      },
-    ],
-    fiveWhys: {
-      why1: "",
-      why2: "",
-      why3: "",
-      why4: "",
-      why5: "",
-      rootCause: "",
-    },
+    mostPotentialCauses: [{ id: "p1", cause: "", checkMethod: "", result: "" }],
+    fiveWhys: { why1: "", why2: "", why3: "", why4: "", why5: "", rootCause: "" },
   },
-  step5_6: {
-    shortTermPlan: "",
-    longTermPlan: "",
-    actionPlans: [
-      {
-        id: "a1",
-        plan: "",
-        area: "",
-        pic: "",
-        targetDate: "",
-        progress: 0,
-      },
-    ],
-  },
+  step5_6: { shortTermPlan: "", longTermPlan: "", actionPlans: [{ id: "a1", plan: "", area: "", pic: "", targetDate: "", progress: 0 }] },
   step7: {
-    checkMethod: "",
-    checkFrequency: "",
-    checkPic: "",
-    testResultSummary: "",
-    chartData: [
-      { label: "Bulan 1", standard: 10, before: 25, after: 8 },
-      { label: "Bulan 2", standard: 10, before: 28, after: 7 },
-      { label: "Bulan 3", standard: 10, before: 30, after: 6 },
-    ],
-    chartImage: "",
-    followUpDecision: "proliferasi",
-    followUpNote: "",
+    checkMethod: "", checkFrequency: "", checkPic: "", testResultSummary: "",
+    chartData: [{ label: "Bulan 1", standard: 10, before: 25, after: 8 }, { label: "Bulan 2", standard: 10, before: 28, after: 7 }, { label: "Bulan 3", standard: 10, before: 30, after: 6 }],
+    chartImage: "", followUpDecision: "proliferasi", followUpNote: "",
   },
   step8: {
-    documentsCreated: [
-      {
-        id: "d1",
-        docNumber: "",
-        docName: "",
-        status: "Dibuat",
-      },
-    ],
-    beforeCondition: "",
-    afterCondition: "",
-    beforeUrl: "",
-    afterUrl: "",
-    maintenancePic: "",
-    effectiveDate: "",
-    attachments: [],
+    documentsCreated: [{ id: "d1", docNumber: "", docName: "", status: "Dibuat" }],
+    beforeCondition: "", afterCondition: "", beforeUrl: "", afterUrl: "",
+    maintenancePic: "", effectiveDate: "", attachments: [],
   },
 };

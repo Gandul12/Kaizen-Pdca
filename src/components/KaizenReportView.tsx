@@ -3,7 +3,9 @@
 import React, { useState, useCallback } from "react";
 import { KaizenProject } from "@/types/kaizen";
 import { generateKaizenDocx } from "@/lib/docxExport";
-import { exportElementToPdf } from "@/lib/pdfExport";
+import { exportElementToPdf, estimateTotalImagesSize } from "@/lib/pdfExport";
+import { Toast } from "@/components/Toast";
+import { FishboneDiagramView } from "@/components/FishboneDiagramView";
 import {
   FileText,
   Download,
@@ -11,6 +13,7 @@ import {
   Edit3,
   Eye,
   Loader2,
+  AlertTriangle,
 } from "lucide-react";
 import {
   LineChart,
@@ -34,6 +37,9 @@ export const KaizenReportView: React.FC<KaizenReportViewProps> = ({
 }) => {
   const [isExportingDocx, setIsExportingDocx] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const imgInfo = estimateTotalImagesSize(project);
 
   const { content, title, department, leader, teamMembers, startDate, dueDate, status } = project;
   const h = content.header || { title, department, leader, teamMembers, startDate, dueDate, status };
@@ -48,7 +54,11 @@ export const KaizenReportView: React.FC<KaizenReportViewProps> = ({
   const safeFileName = (h.title || title || "Proyek").replace(/[^a-zA-Z0-9_\-\s]/g, "_").substring(0, 60);
 
   const handleExportDocx = useCallback(async () => {
+    setExportError(null);
     setIsExportingDocx(true);
+    // Yield execution so UI updates loading state before running docx compilation
+    await new Promise((r) => setTimeout(r, 60));
+
     try {
       const blob = await generateKaizenDocx(project);
       const url = URL.createObjectURL(blob);
@@ -59,7 +69,7 @@ export const KaizenReportView: React.FC<KaizenReportViewProps> = ({
       link.click();
       document.body.removeChild(link);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      // Log export
+
       fetch(`/api/kaizen/${project.id}/log-export`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -67,18 +77,33 @@ export const KaizenReportView: React.FC<KaizenReportViewProps> = ({
       }).catch(() => {});
     } catch (error) {
       console.error("Export Word (.docx) error:", error);
-      alert("Gagal export Word. Silakan coba lagi.");
+      setExportError("Gagal export Word (.docx). Silakan coba lagi.");
     } finally {
       setIsExportingDocx(false);
     }
   }, [project, safeFileName]);
 
   const handleExportPdf = useCallback(async () => {
+    setExportError(null);
+
+    // Pre-check for heavy images
+    const imgData = estimateTotalImagesSize(project);
+    if (imgData.exceedsLimit) {
+      const confirmProceed = confirm(
+        `Peringatan: Proyek ini memiliki ${imgData.imageCount} gambar (estimasi ~${imgData.totalMB} MB).\n` +
+        `Proses export PDF mungkin membutuhkan waktu atau memori besar pada perangkat dengan memori terbatas.\n\n` +
+        `Apakah Anda ingin melanjutkan export PDF?`
+      );
+      if (!confirmProceed) return;
+    }
+
     setIsExportingPdf(true);
+    // Yield execution so UI updates loading state before running PDF capture
+    await new Promise((r) => setTimeout(r, 120));
+
     try {
-      await new Promise((r) => setTimeout(r, 200));
       await exportElementToPdf("kaizen-printable-report", `Kaizen-${safeFileName}.pdf`);
-      // Log export
+
       fetch(`/api/kaizen/${project.id}/log-export`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -86,11 +111,11 @@ export const KaizenReportView: React.FC<KaizenReportViewProps> = ({
       }).catch(() => {});
     } catch (error) {
       console.error("Export PDF error:", error);
-      alert("Gagal export PDF. Silakan coba lagi.");
+      setExportError("Gagal export PDF. Silakan coba lagi.");
     } finally {
       setIsExportingPdf(false);
     }
-  }, [safeFileName, project.id]);
+  }, [safeFileName, project]);
 
   const decisionLabels: Record<string, string> = {
     proliferasi: "1. Proliferasi / Standardisasi ke Area Lain (Horizontal Deployment)",
@@ -101,6 +126,24 @@ export const KaizenReportView: React.FC<KaizenReportViewProps> = ({
 
   return (
     <div className="space-y-6">
+      {exportError && (
+        <Toast
+          message={exportError}
+          type="error"
+          onClose={() => setExportError(null)}
+        />
+      )}
+
+      {imgInfo.exceedsLimit && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl p-3.5 flex items-center gap-2.5 text-xs text-amber-900 print:hidden shadow-xs">
+          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+          <span>
+            <strong>Peringatan Ukuran Media:</strong> Proyek ini memiliki {imgInfo.imageCount} gambar (estimasi ~{imgInfo.totalMB} MB).
+            Proses export PDF pada perangkat seluler mungkin memerlukan waktu lebih lama.
+          </span>
+        </div>
+      )}
+
       {/* ═══ Top Action Bar (NOT captured in PDF) ═══ */}
       <div className="bg-white p-4 rounded-xl shadow-md border border-slate-200 flex flex-wrap items-center justify-between gap-3 print:hidden">
         <div className="flex items-center gap-2">
@@ -330,15 +373,12 @@ export const KaizenReportView: React.FC<KaizenReportViewProps> = ({
             <span className="text-indigo-300 font-mono text-[10px]">Step 4 of 8</span>
           </div>
 
-          <div className="border border-slate-300 rounded-lg overflow-hidden text-xs mt-3">
-            <div className="bg-slate-100 p-2 font-bold text-slate-800 border-b border-slate-300">4.1 Fishbone (5M + 1E):</div>
-            <div className="grid grid-cols-1 sm:grid-cols-5 divide-y sm:divide-y-0 sm:divide-x divide-slate-300 bg-white">
-              <div className="p-2"><span className="font-bold text-slate-700 block text-[10px]">MAN</span><p className="whitespace-pre-line mt-0.5">{s4?.fishbone?.man || "-"}</p></div>
-              <div className="p-2"><span className="font-bold text-slate-700 block text-[10px]">MACHINE</span><p className="whitespace-pre-line mt-0.5">{s4?.fishbone?.machine || "-"}</p></div>
-              <div className="p-2"><span className="font-bold text-slate-700 block text-[10px]">METHOD</span><p className="whitespace-pre-line mt-0.5">{s4?.fishbone?.method || "-"}</p></div>
-              <div className="p-2"><span className="font-bold text-slate-700 block text-[10px]">MATERIAL</span><p className="whitespace-pre-line mt-0.5">{s4?.fishbone?.material || "-"}</p></div>
-              <div className="p-2"><span className="font-bold text-slate-700 block text-[10px]">ENVIRONMENT</span><p className="whitespace-pre-line mt-0.5">{s4?.fishbone?.environment || "-"}</p></div>
-            </div>
+          <div className="mt-3 space-y-2">
+            <div className="text-xs font-bold text-slate-800 px-1">4.1 Diagram Fishbone (Ishikawa 5M + 1E):</div>
+            <FishboneDiagramView
+              fishbone={s4?.fishbone || { man: "", machine: "", method: "", material: "", environment: "" }}
+              effectTitle={s3?.projectTheme || h.title || "MASALAH UTAMA"}
+            />
           </div>
 
           {s4?.fishboneImage && (

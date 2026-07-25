@@ -270,11 +270,42 @@ export default function KaizenApp() {
   };
 
   const deleteProject = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation(); if (!confirm("Hapus proyek ini?")) return;
-    const doDel = async (pw: string) => { const res = await fetch(`/api/kaizen/${id}`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectPassword: pw }) }); return (await res.json()).success === true; };
-    const cached = unlockedPasswords[id]; if (cached !== undefined) { const ok = await doDel(cached); if (ok) { delete unlockedPasswords[id]; removeMyProjectId(id); if (activeProject?.id === id) { setActiveProject(null); setViewMode("list"); } fetchProjects(); } return; }
-    openPasswordModal("enter", "Hapus Proyek", "Masukkan password untuk konfirmasi.",
-      async (pw) => { setPwModalLoading(true); const ok = await doDel(pw); if (ok) { delete unlockedPasswords[id]; removeMyProjectId(id); if (activeProject?.id === id) { setActiveProject(null); setViewMode("list"); } fetchProjects(); setPwModalOpen(false); } else setPwModalError("Password salah."); setPwModalLoading(false); });
+    e.stopPropagation();
+    openPasswordModal(
+      "enter",
+      "Konfirmasi Hapus Proyek",
+      "Masukkan password proyek yang dibuat saat pendaftaran untuk mengonfirmasi penghapusan. Proyek tidak dapat dihapus jika password salah.",
+      async (pw: string) => {
+        setPwModalLoading(true);
+        setPwModalError("");
+
+        try {
+          const res = await fetch(`/api/kaizen/${id}`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ projectPassword: pw }),
+          });
+          const json = await res.json();
+
+          if (json.success) {
+            delete unlockedPasswords[id];
+            removeMyProjectId(id);
+            if (activeProject?.id === id) {
+              setActiveProject(null);
+              setViewMode("list");
+            }
+            fetchProjects();
+            setPwModalOpen(false);
+          } else {
+            setPwModalError(json.error || "Password proyek salah. Akses ditolak.");
+          }
+        } catch {
+          setPwModalError("Gagal menghapus proyek. Periksa koneksi internet Anda.");
+        } finally {
+          setPwModalLoading(false);
+        }
+      }
+    );
   };
 
   // ──── Content ────

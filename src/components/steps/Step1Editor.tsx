@@ -2,7 +2,8 @@
 
 import React, { useState } from "react";
 import { Step1Data } from "@/types/kaizen";
-import { Upload, Trash2, Image as ImageIcon, Info, Plus } from "lucide-react";
+import { Upload, Trash2, Image as ImageIcon, Plus } from "lucide-react";
+import { Toast } from "@/components/Toast";
 
 interface Step1EditorProps {
   data: Step1Data;
@@ -11,6 +12,7 @@ interface Step1EditorProps {
 
 export const Step1Editor: React.FC<Step1EditorProps> = ({ data, onChange }) => {
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const handleTextChange = (field: keyof Step1Data, value: string) => {
     onChange({
@@ -24,6 +26,8 @@ export const Step1Editor: React.FC<Step1EditorProps> = ({ data, onChange }) => {
     if (!files || files.length === 0) return;
 
     setIsUploading(true);
+    setUploadError(null);
+
     try {
       const file = files[0];
       const formData = new FormData();
@@ -48,11 +52,15 @@ export const Step1Editor: React.FC<Step1EditorProps> = ({ data, onChange }) => {
           ...data,
           images: newImages,
         });
+      } else {
+        setUploadError(json.error || "Gagal mengunggah gambar. Silakan coba lagi.");
       }
     } catch (err) {
       console.error("Upload image error:", err);
+      setUploadError("Gagal upload, periksa koneksi internet Anda.");
     } finally {
       setIsUploading(false);
+      e.target.value = "";
     }
   };
 
@@ -74,6 +82,14 @@ export const Step1Editor: React.FC<Step1EditorProps> = ({ data, onChange }) => {
 
   return (
     <div className="bg-white rounded-xl shadow-md border border-slate-200 p-6 space-y-6">
+      {uploadError && (
+        <Toast
+          message={uploadError}
+          type="error"
+          onClose={() => setUploadError(null)}
+        />
+      )}
+
       <div className="border-b border-slate-200 pb-4">
         <div className="flex items-center gap-2 text-indigo-700 font-bold text-lg">
           <span className="px-2.5 py-0.5 rounded bg-indigo-100 text-indigo-800 text-sm">

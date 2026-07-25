@@ -17,6 +17,7 @@ import {
   ChevronUp,
   Image as ImageIcon,
 } from "lucide-react";
+import { Toast } from "@/components/Toast";
 
 interface Step4EditorProps {
   data: Step4Data;
@@ -28,6 +29,7 @@ export const Step4Editor: React.FC<Step4EditorProps> = ({ data, onChange }) => {
     !!(data.fiveWhys?.why4 || data.fiveWhys?.why5)
   );
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const handleFishboneChange = (field: keyof Fishbone5ME, value: string) => {
     onChange({
@@ -89,6 +91,8 @@ export const Step4Editor: React.FC<Step4EditorProps> = ({ data, onChange }) => {
     if (!files || files.length === 0) return;
 
     setIsUploading(true);
+    setUploadError(null);
+
     try {
       const file = files[0];
       const formData = new FormData();
@@ -105,16 +109,28 @@ export const Step4Editor: React.FC<Step4EditorProps> = ({ data, onChange }) => {
           ...data,
           fishboneImage: json.fileUrl,
         });
+      } else {
+        setUploadError(json.error || "Gagal mengunggah gambar. Silakan coba lagi.");
       }
     } catch (err) {
       console.error("Fishbone image upload error:", err);
+      setUploadError("Gagal upload, periksa koneksi internet Anda.");
     } finally {
       setIsUploading(false);
+      e.target.value = "";
     }
   };
 
   return (
     <div className="bg-white rounded-xl shadow-md border border-slate-200 p-6 space-y-8">
+      {uploadError && (
+        <Toast
+          message={uploadError}
+          type="error"
+          onClose={() => setUploadError(null)}
+        />
+      )}
+
       <div className="border-b border-slate-200 pb-4">
         <div className="flex items-center gap-2 text-indigo-700 font-bold text-lg">
           <span className="px-2.5 py-0.5 rounded bg-indigo-100 text-indigo-800 text-sm">

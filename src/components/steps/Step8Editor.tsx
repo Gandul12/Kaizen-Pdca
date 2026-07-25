@@ -11,6 +11,7 @@ import {
   Paperclip,
   Image as ImageIcon,
 } from "lucide-react";
+import { Toast } from "@/components/Toast";
 
 interface Step8EditorProps {
   data: Step8Data;
@@ -21,6 +22,7 @@ export const Step8Editor: React.FC<Step8EditorProps> = ({ data, onChange }) => {
   const [isUploadingBefore, setIsUploadingBefore] = useState(false);
   const [isUploadingAfter, setIsUploadingAfter] = useState(false);
   const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const handleTextChange = (field: keyof Step8Data, value: any) => {
     onChange({
@@ -71,6 +73,7 @@ export const Step8Editor: React.FC<Step8EditorProps> = ({ data, onChange }) => {
 
     if (type === "before") setIsUploadingBefore(true);
     else setIsUploadingAfter(true);
+    setUploadError(null);
 
     try {
       const file = files[0];
@@ -89,12 +92,16 @@ export const Step8Editor: React.FC<Step8EditorProps> = ({ data, onChange }) => {
         } else {
           onChange({ ...data, afterUrl: json.fileUrl });
         }
+      } else {
+        setUploadError(json.error || "Gagal mengunggah foto. Silakan coba lagi.");
       }
     } catch (err) {
       console.error(`Upload ${type} image error:`, err);
+      setUploadError("Gagal upload, periksa koneksi internet Anda.");
     } finally {
       if (type === "before") setIsUploadingBefore(false);
       else setIsUploadingAfter(false);
+      e.target.value = "";
     }
   };
 
@@ -103,6 +110,8 @@ export const Step8Editor: React.FC<Step8EditorProps> = ({ data, onChange }) => {
     if (!files || files.length === 0) return;
 
     setIsUploadingAttachment(true);
+    setUploadError(null);
+
     try {
       const file = files[0];
       const formData = new FormData();
@@ -125,11 +134,15 @@ export const Step8Editor: React.FC<Step8EditorProps> = ({ data, onChange }) => {
           ...data,
           attachments: [...(data.attachments || []), newItem],
         });
+      } else {
+        setUploadError(json.error || "Gagal mengunggah lampiran. Silakan coba lagi.");
       }
     } catch (err) {
       console.error("Attachment upload error:", err);
+      setUploadError("Gagal upload, periksa koneksi internet Anda.");
     } finally {
       setIsUploadingAttachment(false);
+      e.target.value = "";
     }
   };
 
@@ -142,6 +155,14 @@ export const Step8Editor: React.FC<Step8EditorProps> = ({ data, onChange }) => {
 
   return (
     <div className="bg-white rounded-xl shadow-md border border-slate-200 p-6 space-y-8">
+      {uploadError && (
+        <Toast
+          message={uploadError}
+          type="error"
+          onClose={() => setUploadError(null)}
+        />
+      )}
+
       <div className="border-b border-slate-200 pb-4">
         <div className="flex items-center gap-2 text-indigo-700 font-bold text-lg">
           <span className="px-2.5 py-0.5 rounded bg-indigo-100 text-indigo-800 text-sm">

@@ -7,6 +7,7 @@ import { z } from "zod";
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   ADMIN_PASSWORD: z.string().optional(),
+  GENBA_PASSWORD: z.string().optional(),
   BLOB_READ_WRITE_TOKEN: z.string().optional(),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 });

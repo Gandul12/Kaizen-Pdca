@@ -85,7 +85,57 @@ export async function ensureSchema(): Promise<void> {
             created_by TEXT,
             created_at TIMESTAMP DEFAULT NOW() NOT NULL
           );
+
+          CREATE TABLE IF NOT EXISTS genba_entries (
+            id TEXT PRIMARY KEY,
+            date VARCHAR(10) NOT NULL,
+            leader_name TEXT NOT NULL,
+            line_name TEXT,
+            daily_target TEXT,
+            items JSONB NOT NULL,
+            linked_project_id TEXT,
+            created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+            updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+          );
+
+          CREATE TABLE IF NOT EXISTS genba_schedule_items (
+            id TEXT PRIMARY KEY,
+            section_id TEXT NOT NULL,
+            section_title TEXT NOT NULL,
+            section_order INTEGER DEFAULT 0 NOT NULL,
+            item_order INTEGER DEFAULT 0 NOT NULL,
+            point TEXT NOT NULL,
+            standard TEXT NOT NULL,
+            end_minutes INTEGER NOT NULL,
+            is_active BOOLEAN DEFAULT TRUE NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW() NOT NULL,
+            updated_at TIMESTAMP DEFAULT NOW() NOT NULL
+          );
         `);
+
+        // FR-11 seed: isi 8 poin checklist yang sudah dikonfirmasi relevan
+        // (sebelumnya GENBA_SCHEDULE statis di genbaSchedule.ts) — HANYA
+        // kalau tabel masih kosong, supaya tidak menimpa perubahan yang
+        // sudah dibuat lewat UI pengaturan checklist nantinya.
+        const scheduleCount = await client.query(
+          `SELECT COUNT(*)::int AS count FROM genba_schedule_items`
+        );
+        if ((scheduleCount.rows[0]?.count ?? 0) === 0) {
+          await client.query(`
+            INSERT INTO genba_schedule_items
+              (id, section_id, section_title, section_order, item_order, point, standard, end_minutes, is_active)
+            VALUES
+              ('5s-1', '5s', '5S & Kebersihan Area', 0, 0, 'Area kerja bersih dan rapi', 'Tidak ada sampah/barang tidak perlu di area kerja', 450, TRUE),
+              ('5s-2', '5s', '5S & Kebersihan Area', 0, 1, 'Barang & tools pada tempatnya', 'Sesuai label/shadow board', 450, TRUE),
+              ('safety-1', 'safety', 'Safety', 1, 0, 'APD digunakan dengan benar', 'Helm, sepatu safety, sarung tangan sesuai SOP', 480, TRUE),
+              ('safety-2', 'safety', 'Safety', 1, 1, 'Jalur evakuasi tidak terhalang', 'Bebas dari barang/obstacle', 480, TRUE),
+              ('quality-1', 'quality', 'Quality', 2, 0, 'Produk sesuai standar kualitas', 'Tidak ada defect visual', 570, TRUE),
+              ('machine-1', 'machine', 'Kondisi Mesin', 3, 0, 'Kondisi mesin normal', 'Tidak ada suara/getaran abnormal', 600, TRUE),
+              ('machine-2', 'machine', 'Kondisi Mesin', 3, 1, 'Parameter mesin sesuai setting', 'Sesuai SOP parameter produksi', 600, TRUE),
+              ('target-1', 'target', 'Target Produksi', 4, 0, 'Progress terhadap target harian', 'Sesuai rencana produksi', 840, TRUE)
+            ON CONFLICT (id) DO NOTHING;
+          `);
+        }
         schemaEnsured = true;
       } finally {
         client.release();

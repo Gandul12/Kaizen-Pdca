@@ -13,7 +13,9 @@ export type ActionType =
   | "project_unlocked"
   | "admin_login"
   | "page_visit"
-  | "rate_limit_blocked";
+  | "rate_limit_blocked"
+  | "genba_saved"
+  | "genba_deleted";
 
 export async function logActivity(opts: {
   action: ActionType;

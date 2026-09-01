@@ -21,7 +21,7 @@ import {
   Plus, Search, Filter, Copy, Trash2, Eye, Edit3, Save,
   ArrowLeft, ArrowRight, Sparkles, CheckCircle, Clock,
   FileCheck, RefreshCw, Lock, Shield, AlertTriangle, BookTemplate,
-  Link as LinkIcon, UserPlus, Share2,
+  Link as LinkIcon, UserPlus, Share2, ClipboardCheck,
 } from "lucide-react";
 
 const unlockedPasswords: Record<string, string> = {};
@@ -371,6 +371,7 @@ export default function KaizenApp() {
             {viewMode !== "list" && <button onClick={goBackToList} className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1.5 cursor-pointer"><ArrowLeft className="w-4 h-4" /><span className="hidden sm:inline">Proyek Saya</span></button>}
             <button onClick={handleCreateProject} className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-md cursor-pointer"><Plus className="w-4 h-4" /><span className="hidden sm:inline">Baru</span></button>
             {templates.length > 0 && <button onClick={() => setShowTemplates(!showTemplates)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1 cursor-pointer"><BookTemplate className="w-3.5 h-3.5" /></button>}
+            <Link href="/genba" className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1" title="Genba Harian"><ClipboardCheck className="w-3.5 h-3.5" /></Link>
             <Link href="/admin" className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1"><Shield className="w-3.5 h-3.5" /></Link>
           </div>
         </div>

@@ -3,7 +3,7 @@
 import jsPDF from "jspdf";
 import html2canvas from "html2canvas-pro";
 import { KaizenProject } from "@/types/kaizen";
-import { GenbaEntry } from "@/types/genba";
+import type { GenbaEntry } from "@/types/genba";
 
 /**
  * Estimate total size of images in a Kaizen project (in bytes).
@@ -45,45 +45,6 @@ export function estimateTotalImagesSize(project: KaizenProject): {
   inspectUrl(c.step8?.afterUrl);
   // Step 8 attachments
   c.step8?.attachments?.forEach((att) => inspectUrl(att.fileUrl));
-
-  const totalMB = Math.round((totalBytes / (1024 * 1024)) * 10) / 10;
-  const LIMIT_MB = 15;
-
-  return {
-    totalBytes,
-    totalMB,
-    exceedsLimit: totalMB > LIMIT_MB || imageCount >= 10,
-    imageCount,
-  };
-}
-
-/**
- * Estimate total size of photo attachments in a Genba checklist entry
- * (in bytes). Sama pola dengan `estimateTotalImagesSize` di atas, tapi
- * jalan atas struktur data GenbaEntry (bukan KaizenProject) karena
- * bentuk datanya beda — jadi tidak reuse fungsi Kaizen tsb secara langsung.
- */
-export function estimateGenbaImagesSize(entry: GenbaEntry): {
-  totalBytes: number;
-  totalMB: number;
-  exceedsLimit: boolean;
-  imageCount: number;
-} {
-  let totalBytes = 0;
-  let imageCount = 0;
-
-  entry.items?.forEach((item) => {
-    item.attachments?.forEach((att) => {
-      imageCount++;
-      if (att.fileUrl.startsWith("data:")) {
-        // Base64 string length * 0.75 gives approx byte size
-        totalBytes += Math.round(att.fileUrl.length * 0.75);
-      } else {
-        // Uploaded file URL (~2MB estimated average for uploaded photo)
-        totalBytes += 2 * 1024 * 1024;
-      }
-    });
-  });
 
   const totalMB = Math.round((totalBytes / (1024 * 1024)) * 10) / 10;
   const LIMIT_MB = 15;
@@ -262,4 +223,45 @@ export async function exportElementToPdf(
   container.style.margin = origMargin;
 
   pdf.save(fileName);
+}
+
+/**
+ * Estimate total size of photos in a genba entry (in bytes). Struktur hasil
+ * sama seperti estimateTotalImagesSize, tapi menyisir items[].attachments[]
+ * (tipe data genba berbeda dari KaizenProject, jadi tidak reuse langsung).
+ */
+export function estimateGenbaImagesSize(entry: GenbaEntry): {
+  totalBytes: number;
+  totalMB: number;
+  exceedsLimit: boolean;
+  imageCount: number;
+} {
+  let totalBytes = 0;
+  let imageCount = 0;
+
+  const inspectUrl = (url?: string) => {
+    if (!url) return;
+    imageCount++;
+    if (url.startsWith("data:")) {
+      // Base64 string length * 0.75 gives approx byte size
+      totalBytes += Math.round(url.length * 0.75);
+    } else {
+      // Uploaded file URL (~2MB estimated average for uploaded photo)
+      totalBytes += 2 * 1024 * 1024;
+    }
+  };
+
+  entry.items?.forEach((item) => {
+    item.attachments?.forEach((att) => inspectUrl(att.fileUrl));
+  });
+
+  const totalMB = Math.round((totalBytes / (1024 * 1024)) * 10) / 10;
+  const LIMIT_MB = 15;
+
+  return {
+    totalBytes,
+    totalMB,
+    exceedsLimit: totalMB > LIMIT_MB || imageCount >= 10,
+    imageCount,
+  };
 }

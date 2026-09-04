@@ -1,71 +1,62 @@
 "use client";
 
 import React from "react";
-import { GenbaItem } from "@/types/genba";
+import type { GenbaItem } from "@/types/genba";
 
 interface GenbaAndonBadgeProps {
   items: GenbaItem[];
   isToday: boolean;
 }
 
-type AndonLevel = "green" | "yellow" | "red" | "neutral";
-
-const LATE_THRESHOLD_MINUTES = 30;
-
-function getNowMinutes(): number {
-  const now = new Date();
-  return now.getHours() * 60 + now.getMinutes();
+function nowMinutes(): number {
+  const n = new Date();
+  return n.getHours() * 60 + n.getMinutes();
 }
 
-const LEVEL_STYLES: Record<AndonLevel, string> = {
-  green: "bg-emerald-100 text-emerald-800 border-emerald-300",
-  yellow: "bg-amber-100 text-amber-800 border-amber-300",
-  red: "bg-rose-100 text-rose-800 border-rose-300",
-  neutral: "bg-slate-100 text-slate-700 border-slate-300",
-};
-
-const LEVEL_DOT_STYLES: Record<AndonLevel, string> = {
-  green: "bg-emerald-500",
-  yellow: "bg-amber-500",
-  red: "bg-rose-500",
-  neutral: "bg-slate-400",
-};
-
-// Reusable so FR-5/FR-6/FR-7 report components can render the same badge.
 export const GenbaAndonBadge: React.FC<GenbaAndonBadgeProps> = ({ items, isToday }) => {
   const total = items.length;
-  const done = items.filter((it) => it.status !== "na").length;
+  const doneCount = items.filter((it) => it.status !== "pending").length;
 
-  let level: AndonLevel = "neutral";
-  let label = `${done}/${total} selesai`;
+  let color: "green" | "amber" | "red" | "neutral" = "neutral";
+  let label = "";
 
-  if (isToday && total > 0) {
-    const nowMinutes = getNowMinutes();
-    const overdueItems = items.filter((it) => it.status === "na" && nowMinutes > it.endMinutes);
+  if (!isToday) {
+    color = "neutral";
+    label = total > 0 && doneCount === total ? "Lengkap" : `${doneCount}/${total} tercatat`;
+  } else {
+    const nm = nowMinutes();
+    const expected = items.filter((it) => it.endMinutes <= nm);
+    const expectedDone = expected.filter((it) => it.status !== "pending").length;
+    const gap = expected.length - expectedDone;
 
-    if (overdueItems.length === 0) {
-      level = "green";
-      label = done === total ? "Semua selesai" : "Sesuai jadwal";
+    if (expected.length === 0) {
+      color = "green";
+      label = "Belum mulai";
+    } else if (gap >= 2) {
+      color = "red";
+      label = `Tertinggal ${gap} langkah`;
+    } else if (gap === 1) {
+      color = "amber";
+      label = "Sedikit tertinggal";
     } else {
-      const worstGapMinutes = Math.max(...overdueItems.map((it) => nowMinutes - it.endMinutes));
-      if (worstGapMinutes > LATE_THRESHOLD_MINUTES) {
-        level = "red";
-        label = `${overdueItems.length} item terlambat`;
-      } else {
-        level = "yellow";
-        label = `${overdueItems.length} item mendekati tenggat`;
-      }
+      color = "green";
+      label = "Sesuai jadwal";
     }
   }
 
+  const styles = {
+    green: { bg: "bg-emerald-50", dot: "bg-emerald-500", text: "text-emerald-700" },
+    amber: { bg: "bg-amber-50", dot: "bg-amber-500", text: "text-amber-700" },
+    red: { bg: "bg-rose-50", dot: "bg-rose-500", text: "text-rose-700" },
+    neutral: { bg: "bg-slate-100", dot: "bg-slate-400", text: "text-slate-600" },
+  }[color];
+
   return (
-    <div
-      className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold whitespace-nowrap ${LEVEL_STYLES[level]}`}
-    >
-      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${LEVEL_DOT_STYLES[level]}`} />
-      <span>{label}</span>
-      <span className="opacity-70 font-normal">
-        ({done}/{total})
+    <div className={`flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 ${styles.bg}`}>
+      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${styles.dot}`} />
+      <span className={`text-xs font-mono font-semibold ${styles.text}`}>{label}</span>
+      <span className={`ml-auto text-xs font-mono ${styles.text} opacity-80`}>
+        {doneCount}/{total}
       </span>
     </div>
   );

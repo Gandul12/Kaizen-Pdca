@@ -7,6 +7,7 @@ import crypto from "crypto";
 import { logActivity } from "@/lib/activityLogger";
 import { hashPassword } from "@/lib/password";
 import { checkRateLimit } from "@/lib/requestHelpers";
+import { readJsonBodyWithLimit, validateKaizenContent } from "@/lib/kaizenContentSchema";
 
 export async function GET(req: NextRequest) {
   try {
@@ -16,6 +17,22 @@ export async function GET(req: NextRequest) {
     const department = searchParams.get("department") || "";
     const status = searchParams.get("status") || "";
     const ids = searchParams.get("ids") || ""; // comma-separated list of project IDs
+    const isPublic = searchParams.get("public") === "true"; // eksplisit opt-in ke direktori publik
+
+    // SECURITY: sebelumnya, request tanpa "ids" (mis. dipanggil langsung tanpa
+    // parameter apa pun) diam-diam mengembalikan SEMUA proyek — memungkinkan
+    // enumerasi metadata proyek oleh siapa saja. Sekarang wajib pilih salah
+    // satu secara eksplisit: filter "ids" (mode "mine") atau "public=true"
+    // (mode direktori publik yang memang disengaja oleh UI).
+    if (!ids && !isPublic) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Wajib menyertakan parameter 'ids' atau 'public=true' untuk mengambil daftar proyek.",
+        },
+        { status: 400 }
+      );
+    }
 
     const conditions = [];
 
@@ -33,7 +50,8 @@ export async function GET(req: NextRequest) {
         or(
           ilike(kaizenProjects.title, `%${search}%`),
           ilike(kaizenProjects.leader, `%${search}%`),
-          ilike(kaizenProjects.department, `%${search}%`)
+          ilike(kaizenProjects.department, `%${search}%`),
+          ilike(kaizenProjects.industry, `%${search}%`)
         )
       );
     }
@@ -51,6 +69,7 @@ export async function GET(req: NextRequest) {
       id: kaizenProjects.id,
       title: kaizenProjects.title,
       department: kaizenProjects.department,
+      industry: kaizenProjects.industry,
       leader: kaizenProjects.leader,
       teamMembers: kaizenProjects.teamMembers,
       startDate: kaizenProjects.startDate,
@@ -66,8 +85,8 @@ export async function GET(req: NextRequest) {
       projects = await db.select(selectFields).from(kaizenProjects)
         .where(and(...conditions)).orderBy(desc(kaizenProjects.updatedAt));
     } else {
-      // No IDs and no filters → return empty (force ownership-based access)
-      return NextResponse.json({ success: true, data: [] });
+      projects = await db.select(selectFields).from(kaizenProjects)
+        .orderBy(desc(kaizenProjects.updatedAt));
     }
 
     return NextResponse.json({ success: true, data: projects });
@@ -84,17 +103,32 @@ export async function POST(req: NextRequest) {
 
   try {
     await ensureSchema();
-    const body = await req.json().catch(() => ({}));
+
+    const parsed = await readJsonBodyWithLimit(req);
+    if (!parsed.ok) {
+      return NextResponse.json({ success: false, error: parsed.error }, { status: parsed.status });
+    }
+    const body = parsed.body;
+
+    if (body.content !== undefined) {
+      const contentError = validateKaizenContent(body.content);
+      if (contentError) {
+        return NextResponse.json({ success: false, error: contentError }, { status: 400 });
+      }
+    }
+
     const id = "kz-" + Date.now() + "-" + crypto.randomBytes(4).toString("hex");
 
     const title = body.title || "Proyek Kaizen Baru";
     const department = body.department || "Produksi";
+    const industry = body.industry || "Manufaktur";
     const leader = body.leader || "PIC Utama";
     const teamMembers = body.teamMembers || "";
     const startDate = body.startDate || new Date().toISOString().split("T")[0];
     const dueDate = body.dueDate || "";
     const status = body.status || "Draft";
     const plainPassword = body.projectPassword || "";
+    const visitorId = body.visitorId || null;
 
     if (!plainPassword) {
       return NextResponse.json(
@@ -104,8 +138,6 @@ export async function POST(req: NextRequest) {
     }
 
     const hashedPassword = await hashPassword(plainPassword);
-
-    // Generate a share token for view-only access
     const shareToken = crypto.randomBytes(16).toString("hex");
 
     const content: KaizenContent = body.content || {
@@ -114,7 +146,7 @@ export async function POST(req: NextRequest) {
     };
 
     const newProject = {
-      id, title, department, leader, teamMembers, startDate, dueDate, status,
+      id, title, department, industry, leader, teamMembers, startDate, dueDate, status,
       currentStep: 1, content, projectPassword: hashedPassword,
       isTemplate: body.isTemplate === 1 ? 1 : 0,
       templateName: body.templateName || null,
@@ -127,9 +159,10 @@ export async function POST(req: NextRequest) {
     await logActivity({
       action: "project_created",
       projectId: id,
-      detail: `Project "${title}" created by ${leader}`,
+      detail: `Project "${title}" (${industry}) created by ${leader}`,
       ipAddress: req.headers.get("x-forwarded-for") || "",
       userAgent: req.headers.get("user-agent") || "",
+      visitorId,
     });
 
     const { projectPassword: _pw, ...safeProject } = newProject;

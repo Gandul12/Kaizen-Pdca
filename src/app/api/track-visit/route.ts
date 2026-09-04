@@ -9,12 +9,17 @@ export async function POST(req: NextRequest) {
 
   try {
     await ensureSchema();
+    const body = await req.json().catch(() => ({}));
+    const visitorId = body.visitorId || null;
+    const page = body.page || "/";
     const ip = getClientIp(req);
+
     await logActivity({
       action: "page_visit",
-      detail: "Homepage visit",
+      detail: page,
       ipAddress: ip,
       userAgent: req.headers.get("user-agent") || "",
+      visitorId,
     });
     return NextResponse.json({ success: true });
   } catch {

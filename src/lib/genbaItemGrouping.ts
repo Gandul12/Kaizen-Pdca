@@ -1,4 +1,4 @@
-import { GenbaItem } from "@/types/genba";
+import type { GenbaItem } from "@/types/genba";
 
 export interface GenbaSectionGroup {
   sectionId: string;
@@ -7,41 +7,30 @@ export interface GenbaSectionGroup {
 }
 
 /**
- * Kelompokkan item genba berdasarkan `sectionId` yang menempel di tiap item
- * (FR-11) — BUKAN lookup ke GENBA_SCHEDULE statis atau tabel master
- * genba_schedule_items. Ini satu-satunya sumber kebenaran untuk render
- * section di UI/DOCX/PDF, supaya entry genba self-contained dan tidak bisa
- * divergen dari master data kalau master-nya diedit belakangan.
+ * Kelompokkan items berdasarkan sectionId. Judul diambil dari
+ * item.sectionTitle (fallback ke sectionId kalau kosong, untuk kompatibilitas
+ * entry lama). Urutan section = urutan kemunculan PERTAMA di array items —
+ * BUKAN lookup ke tabel master genba_schedule_items, karena entry genba
+ * self-contained (lihat FR-1/FR-11).
  *
- * Urutan section = urutan kemunculan pertama tiap sectionId di array
- * `items` (array items sendiri sudah terurut sesuai sectionOrder/itemOrder
- * saat entry dibuat, lihat buildEmptyItems() di genbaSchedule.ts).
- *
- * Fallback kompatibilitas mundur: entry lama (dibuat sebelum FR-11) belum
- * menyimpan `sectionTitle` per item — kalau kosong, judul section jatuh
- * balik ke `sectionId` apa adanya (bukan di-backfill ke database).
- *
- * File ini SENGAJA tidak mengimpor apa pun dari "@/db" (server-only, pakai
- * koneksi `pg`) supaya aman diimpor oleh komponen client sekalipun
- * (src/app/genba/page.tsx, src/components/genba/GenbaReportView.tsx) tanpa
- * merusak bundling.
+ * Ini SATU-SATUNYA sumber kebenaran untuk render section di UI/DOCX/PDF.
+ * GENBA_SCHEDULE statis tidak boleh dipakai lagi untuk ini.
  */
 export function groupGenbaItemsBySection(items: GenbaItem[]): GenbaSectionGroup[] {
-  const sectionOrder: string[] = [];
-  const sectionsById = new Map<string, GenbaSectionGroup>();
+  const order: string[] = [];
+  const map = new Map<string, GenbaSectionGroup>();
 
   for (const item of items) {
-    const sectionId = item.sectionId;
-    if (!sectionsById.has(sectionId)) {
-      sectionOrder.push(sectionId);
-      sectionsById.set(sectionId, {
-        sectionId,
-        sectionTitle: item.sectionTitle || sectionId,
+    if (!map.has(item.sectionId)) {
+      map.set(item.sectionId, {
+        sectionId: item.sectionId,
+        sectionTitle: item.sectionTitle || item.sectionId,
         items: [],
       });
+      order.push(item.sectionId);
     }
-    sectionsById.get(sectionId)!.items.push(item);
+    map.get(item.sectionId)!.items.push(item);
   }
 
-  return sectionOrder.map((id) => sectionsById.get(id)!);
+  return order.map((id) => map.get(id)!);
 }

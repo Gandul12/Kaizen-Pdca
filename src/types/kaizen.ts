@@ -118,6 +118,7 @@ export interface Step7Data {
   testResultSummary: string;
   chartData: FollowUpChartPoint[];
   chartImage?: string;
+  chartType?: "line" | "bar";
   followUpDecision: FollowUpDecision;
   followUpNote: string;
 }

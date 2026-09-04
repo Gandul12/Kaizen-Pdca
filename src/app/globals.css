@@ -1,1 +1,195 @@
+@import url('https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800;900&family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap');
 @import "tailwindcss";
+
+:root {
+  --navy-deep: #050b16;
+  --navy: #0d1b30;
+  --navy-mid: #16304f;
+  --navy-card: #101f36;
+  --teal: #1fb6a8;
+  --teal-glow: #5fe8d8;
+  --gold: #d4a94c;
+  --gold-soft: #f0d68a;
+  --fog: #8fa3bd;
+  --border: rgba(143, 163, 189, 0.16);
+}
+
+body {
+  background-color: var(--navy-deep);
+  color: #f8fafc;
+  font-family: 'DM Sans', sans-serif;
+  overflow-x: hidden;
+}
+
+.font-display {
+  font-family: 'Big Shoulders Display', sans-serif;
+}
+
+.font-body {
+  font-family: 'DM Sans', sans-serif;
+}
+
+/* Form control text visibility fixes */
+input, textarea, select {
+  color: #0f172a;
+}
+
+input::placeholder, textarea::placeholder {
+  color: #64748b;
+}
+
+/* Explicit dark inputs in dark cards/modal */
+.bg-\[\#16304f\] input,
+.bg-\[\#16304f\] textarea,
+.bg-\[\#16304f\] select,
+.bg-\[\#101f36\] input,
+.bg-\[\#101f36\] textarea,
+.bg-\[\#101f36\] select,
+.bg-\[\#0d1b30\] input,
+.bg-\[\#0d1b30\] textarea,
+.bg-\[\#0d1b30\] select,
+.bg-slate-800 input,
+.bg-slate-800 textarea,
+.bg-slate-800 select,
+.bg-slate-900 input,
+.bg-slate-900 textarea,
+.bg-slate-900 select,
+input.text-white,
+textarea.text-white,
+select.text-white,
+input.text-slate-100,
+textarea.text-slate-100,
+select.text-slate-100 {
+  color: #f8fafc !important;
+}
+
+/* Explicit light inputs inside white/light cards */
+.bg-white input,
+.bg-white textarea,
+.bg-white select,
+.bg-slate-50 input,
+.bg-slate-50 textarea,
+.bg-slate-50 select,
+input.bg-white,
+textarea.bg-white,
+select.bg-white,
+input.bg-slate-50,
+textarea.bg-slate-50,
+select.bg-slate-50 {
+  color: #0f172a !important;
+}
+
+.bg-white input::placeholder,
+.bg-white textarea::placeholder,
+.bg-slate-50 input::placeholder,
+.bg-slate-50 textarea::placeholder,
+input.bg-white::placeholder,
+textarea.bg-white::placeholder {
+  color: #64748b !important;
+}
+
+/* Custom filled primary button: gold-soft -> gold gradient with navy-deep text */
+.btn-gold {
+  background: linear-gradient(135deg, #f0d68a 0%, #d4a94c 100%);
+  color: #050b16;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 700;
+  border-radius: 0.625rem;
+  box-shadow: 0 4px 16px rgba(212, 169, 76, 0.25);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-gold:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(212, 169, 76, 0.35);
+  filter: brightness(1.05);
+}
+
+.btn-gold:active {
+  transform: translateY(0);
+}
+
+/* Ghost secondary inputs / buttons: thin border, semi-transparent dark bg */
+.btn-ghost {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(143, 163, 189, 0.25);
+  color: #8fa3bd;
+  font-family: 'DM Sans', sans-serif;
+  transition: all 0.2s ease;
+}
+
+.btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: #5fe8d8;
+  color: #5fe8d8;
+}
+
+/* Dark card style */
+.card-navy {
+  background-color: #101f36;
+  border: 1px solid rgba(143, 163, 189, 0.16);
+  border-radius: 14px;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card-navy:hover {
+  border-color: rgba(31, 182, 168, 0.5);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px -10px rgba(5, 11, 22, 0.7);
+}
+
+/* Custom scrollbars for dark theme */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0d1b30;
+}
+::-webkit-scrollbar-thumb {
+  background: #16304f;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #1fb6a8;
+}
+
+/* Animations for PDCA ring & floating particles */
+@keyframes floatParticle {
+  0% {
+    transform: translateY(0) scale(1);
+    opacity: 0.1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+  100% {
+    transform: translateY(-80px) scale(1.2);
+    opacity: 0;
+  }
+}
+
+.animate-particle {
+  animation: floatParticle 8s infinite ease-in-out;
+}
+
+@keyframes strokeDraw {
+  0% {
+    stroke-dashoffset: 280;
+  }
+  100% {
+    stroke-dashoffset: 0;
+  }
+}
+
+.animate-arc {
+  stroke-dasharray: 280;
+  stroke-dashoffset: 280;
+  animation: strokeDraw 1.2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.delay-1 { animation-delay: 0.1s; }
+.delay-2 { animation-delay: 0.4s; }
+.delay-3 { animation-delay: 0.7s; }
+.delay-4 { animation-delay: 1.0s; }
+.delay-5 { animation-delay: 1.3s; }

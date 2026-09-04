@@ -15,13 +15,17 @@ import { KaizenReportView } from "@/components/KaizenReportView";
 import { PasswordModal } from "@/components/PasswordModal";
 import { RevisionHistory } from "@/components/RevisionHistory";
 import { OnboardingGuide } from "@/components/OnboardingGuide";
-import { getMyProjectIds, addMyProjectId, removeMyProjectId } from "@/lib/ownership";
+import { BrandMonogram } from "@/components/BrandMonogram";
+import { HeroPdcaIllustration } from "@/components/HeroPdcaIllustration";
+import { AboutSection } from "@/components/AboutSection";
+import { getMyProjectIds, addMyProjectId, removeMyProjectId, hasMyProjectId } from "@/lib/ownership";
+import { getVisitorId } from "@/lib/visitor";
 import Link from "next/link";
 import {
   Plus, Search, Filter, Copy, Trash2, Eye, Edit3, Save,
-  ArrowLeft, ArrowRight, Sparkles, CheckCircle, Clock,
+  ArrowLeft, ArrowRight, CheckCircle, Clock,
   FileCheck, RefreshCw, Lock, Shield, AlertTriangle, BookTemplate,
-  Link as LinkIcon, UserPlus, Share2, ClipboardCheck,
+  UserPlus, Share2, ArrowUpRight, Sparkles, SlidersHorizontal,
 } from "lucide-react";
 
 const unlockedPasswords: Record<string, string> = {};
@@ -34,13 +38,13 @@ function daysUntilDue(dueDate: string | null | undefined): number | null {
 
 export default function KaizenApp() {
   const [projects, setProjects] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
 
   const [activeProject, setActiveProject] = useState<KaizenProject | null>(null);
-  const [viewMode, setViewMode] = useState<"list" | "edit" | "preview">("list");
+  const [viewMode, setViewMode] = useState<"landing" | "list" | "edit" | "preview">("landing");
   const [activeStep, setActiveStep] = useState<number>(1);
   const [autoSaveStatus, setAutoSaveStatus] = useState<"saved" | "saving" | "idle">("idle");
   const [isDirty, setIsDirty] = useState(false);
@@ -60,6 +64,7 @@ export default function KaizenApp() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newDepartment, setNewDepartment] = useState("");
+  const [newIndustry, setNewIndustry] = useState("Manufaktur");
   const [newLeader, setNewLeader] = useState("");
   const [newTeamMembers, setNewTeamMembers] = useState("");
   const [saveAsTemplate, setSaveAsTemplate] = useState(false);
@@ -72,6 +77,9 @@ export default function KaizenApp() {
   // Share link modal
   const [shareUrl, setShareUrl] = useState("");
   const [showShareModal, setShowShareModal] = useState(false);
+
+  // List mode: "all" (public directory) vs "mine" (my projects only)
+  const [listFilterMode, setListFilterMode] = useState<"all" | "mine">("all");
 
   // Templates
   const [templates, setTemplates] = useState<any[]>([]);
@@ -88,15 +96,26 @@ export default function KaizenApp() {
     setPwModalCallback(() => callback); setPwModalOpen(true);
   };
 
-  // ──── Fetch MY projects (filtered by localStorage IDs) ────
+  // ──── Fetch projects (public directory or my projects) ────
   const fetchProjects = useCallback(async () => {
     setIsLoading(true);
     try {
-      const myIds = getMyProjectIds();
-      if (myIds.length === 0) { setProjects([]); setIsLoading(false); return; }
-
       const params = new URLSearchParams();
-      params.set("ids", myIds.join(","));
+
+      if (listFilterMode === "mine") {
+        const myIds = getMyProjectIds();
+        if (myIds.length === 0) {
+          setProjects([]);
+          setIsLoading(false);
+          return;
+        }
+        params.set("ids", myIds.join(","));
+      } else {
+        // Direktori publik disengaja (fitur "all") — API sekarang mewajibkan
+        // opt-in eksplisit ini, tidak lagi default terbuka tanpa parameter.
+        params.set("public", "true");
+      }
+
       if (searchQuery) params.set("search", searchQuery);
       if (departmentFilter !== "all") params.set("department", departmentFilter);
       if (statusFilter !== "all") params.set("status", statusFilter);
@@ -105,9 +124,11 @@ export default function KaizenApp() {
       const json = await res.json();
       if (json.success) setProjects(json.data || []);
     } catch {} finally { setIsLoading(false); }
-  }, [searchQuery, departmentFilter, statusFilter]);
+  }, [searchQuery, departmentFilter, statusFilter, listFilterMode]);
 
-  useEffect(() => { fetchProjects(); }, [fetchProjects]);
+  useEffect(() => {
+    if (viewMode === "list") fetchProjects();
+  }, [viewMode, fetchProjects]);
 
   const fetchTemplates = useCallback(async () => {
     try { const res = await fetch("/api/templates"); const json = await res.json(); if (json.success) setTemplates(json.data || []); } catch {}
@@ -119,7 +140,11 @@ export default function KaizenApp() {
     const today = new Date().toISOString().split("T")[0];
     const key = `visit_logged_${today}`;
     if (!sessionStorage.getItem(key)) {
-      fetch("/api/track-visit", { method: "POST" }).catch(() => {});
+      fetch("/api/track-visit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ page: "/", visitorId: getVisitorId() }),
+      }).catch(() => {});
       sessionStorage.setItem(key, "1");
     }
   }, []);
@@ -166,7 +191,7 @@ export default function KaizenApp() {
       const { project } = await unlockProject(id, cached);
       if (project) { setActiveProject(project); setActiveStep(mode === "edit" ? (project.currentStep || 1) : 1); setIsDirty(false); setViewMode(mode); return; }
     }
-    openPasswordModal("enter", mode === "edit" ? "Buka Dokumen" : "Lihat Dokumen", "Masukkan password proyek.",
+    openPasswordModal("enter", mode === "edit" ? "Buka Dokumen Proyek" : "Lihat Dokumen Proyek", "Masukkan password proyek untuk mengakses.",
       async (pw) => {
         setPwModalLoading(true); setPwModalError("");
         const { project, error } = await unlockProject(id, pw);
@@ -187,21 +212,26 @@ export default function KaizenApp() {
     fetchProjects(); setViewMode("list");
   };
 
+  const goToLanding = async () => {
+    if (activeProjectRef.current && isDirty) { await saveProjectToDb(activeProjectRef.current); setIsDirty(false); }
+    setViewMode("landing");
+  };
+
   // ──── Create ────
-  const handleCreateProject = () => { setNewTitle(""); setNewDepartment(""); setNewLeader(""); setNewTeamMembers(""); setSaveAsTemplate(false); setTemplateName(""); setShowCreateForm(true); };
+  const handleCreateProject = () => { setNewTitle(""); setNewDepartment(""); setNewIndustry("Manufaktur"); setNewLeader(""); setNewTeamMembers(""); setSaveAsTemplate(false); setTemplateName(""); setShowCreateForm(true); setViewMode("list"); };
 
   const submitNewProject = () => {
     if (!newTitle.trim() || !newLeader.trim()) { alert("Nama proyek dan Ketua Tim wajib diisi."); return; }
-    openPasswordModal("create", "Kunci Dokumen", "Buat password untuk mengamankan dokumen.",
+    openPasswordModal("create", "Kunci Dokumen Proyek", "Buat password untuk mengamankan dokumen.",
       async (pw) => {
         setPwModalLoading(true);
         try {
           const content = { ...EMPTY_KAIZEN_CONTENT, header: { title: newTitle.trim(), department: newDepartment.trim() || "Produksi", leader: newLeader.trim(), teamMembers: newTeamMembers.trim(), startDate: new Date().toISOString().split("T")[0], dueDate: "", status: "Draft" as ProjectStatus } };
           const res = await fetch("/api/kaizen", { method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ title: newTitle.trim(), department: newDepartment.trim() || "Produksi", leader: newLeader.trim(), teamMembers: newTeamMembers.trim(), status: "Draft", projectPassword: pw, content, isTemplate: saveAsTemplate ? 1 : 0, templateName: saveAsTemplate ? (templateName.trim() || newTitle.trim()) : null }) });
+            body: JSON.stringify({ title: newTitle.trim(), department: newDepartment.trim() || "Produksi", industry: newIndustry, leader: newLeader.trim(), teamMembers: newTeamMembers.trim(), status: "Draft", projectPassword: pw, content, isTemplate: saveAsTemplate ? 1 : 0, templateName: saveAsTemplate ? (templateName.trim() || newTitle.trim()) : null, visitorId: getVisitorId() }) });
           const json = await res.json();
           if (json.success && json.data) {
-            addMyProjectId(json.data.id); // ← track ownership
+            addMyProjectId(json.data.id);
             unlockedPasswords[json.data.id] = pw;
             setActiveProject(json.data); setActiveStep(1); setIsDirty(false); setViewMode("edit"); setPwModalOpen(false); setShowCreateForm(false); fetchProjects(); fetchTemplates();
           } else setPwModalError(json.error || "Gagal membuat proyek.");
@@ -211,7 +241,7 @@ export default function KaizenApp() {
   };
 
   const createFromTemplate = async (templateId: string) => {
-    openPasswordModal("create", "Buat dari Template", "Buat password untuk proyek baru ini.",
+    openPasswordModal("create", "Buat Proyek dari Template", "Buat password untuk mengamankan proyek baru ini.",
       async (pw) => {
         setPwModalLoading(true);
         const res = await fetch(`/api/kaizen/${templateId}/duplicate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ newPassword: pw }) });
@@ -222,11 +252,11 @@ export default function KaizenApp() {
       });
   };
 
-  // ──── Join project (add existing project by ID + password) ────
+  // ──── Join project ────
   const joinProject = () => {
     const id = joinProjectId.trim();
     if (!id) { alert("ID Proyek wajib diisi."); return; }
-    if (getMyProjectIds().includes(id)) { alert("Proyek ini sudah ada di daftar Anda."); setShowJoinForm(false); return; }
+    if (getMyProjectIds().includes(id)) { alert("Proyek ini sudah ada di daftar Anda."); setShowJoinForm(false); setViewMode("list"); return; }
     openPasswordModal("enter", "Gabung ke Proyek", "Masukkan password proyek untuk menambahkannya ke daftar Anda.",
       async (pw) => {
         setPwModalLoading(true); setPwModalError("");
@@ -234,7 +264,7 @@ export default function KaizenApp() {
         if (project) {
           addMyProjectId(id);
           unlockedPasswords[id] = pw;
-          setPwModalOpen(false); setShowJoinForm(false); setJoinProjectId(""); fetchProjects();
+          setPwModalOpen(false); setShowJoinForm(false); setJoinProjectId(""); setViewMode("list"); fetchProjects();
         } else setPwModalError(error || "ID atau password salah.");
         setPwModalLoading(false);
       });
@@ -265,7 +295,7 @@ export default function KaizenApp() {
       return false;
     };
     const cached = unlockedPasswords[id]; if (cached !== undefined) { await doDup(cached); fetchProjects(); return; }
-    openPasswordModal("enter", "Duplikasi", "Masukkan password proyek.",
+    openPasswordModal("enter", "Duplikasi Proyek", "Masukkan password proyek asli.",
       async (pw) => { setPwModalLoading(true); const ok = await doDup(pw); if (ok) { unlockedPasswords[id] = pw; fetchProjects(); setPwModalOpen(false); } else setPwModalError("Password salah."); setPwModalLoading(false); });
   };
 
@@ -278,7 +308,6 @@ export default function KaizenApp() {
       async (pw: string) => {
         setPwModalLoading(true);
         setPwModalError("");
-
         try {
           const res = await fetch(`/api/kaizen/${id}`, {
             method: "DELETE",
@@ -286,14 +315,10 @@ export default function KaizenApp() {
             body: JSON.stringify({ projectPassword: pw }),
           });
           const json = await res.json();
-
           if (json.success) {
             delete unlockedPasswords[id];
             removeMyProjectId(id);
-            if (activeProject?.id === id) {
-              setActiveProject(null);
-              setViewMode("list");
-            }
+            if (activeProject?.id === id) { setActiveProject(null); setViewMode("list"); }
             fetchProjects();
             setPwModalOpen(false);
           } else {
@@ -323,229 +348,553 @@ export default function KaizenApp() {
   const DeadlineBadge = ({ dueDate, status }: { dueDate?: string | null; status: string }) => {
     if (!dueDate || status === "Completed") return null;
     const days = daysUntilDue(dueDate); if (days === null) return null;
-    if (days < 0) return <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded-full"><AlertTriangle className="w-3 h-3" /> Overdue {Math.abs(days)}d</span>;
-    if (days <= 3) return <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded-full animate-pulse"><Clock className="w-3 h-3" /> H-{days} ⚠️</span>;
-    if (days <= 7) return <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full"><Clock className="w-3 h-3" /> {days}d left</span>;
+    if (days < 0) return <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-300 bg-rose-500/20 border border-rose-500/40 px-2 py-0.5 rounded-full"><AlertTriangle className="w-3 h-3 text-rose-400" /> Overdue {Math.abs(days)}d</span>;
+    if (days <= 3) return <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-300 bg-rose-500/20 border border-rose-500/40 px-2 py-0.5 rounded-full animate-pulse"><Clock className="w-3 h-3" /> H-{days} ⚠️</span>;
+    if (days <= 7) return <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[#f0d68a] bg-[#d4a94c]/20 border border-[#d4a94c]/40 px-2 py-0.5 rounded-full"><Clock className="w-3 h-3" /> {days}d left</span>;
     return null;
   };
 
   const statusBadgeClass = (s: string) =>
-    s === "Completed" ? "bg-emerald-50 text-emerald-700 border-emerald-300"
-    : s === "On Progress" ? "bg-blue-50 text-blue-700 border-blue-300"
-    : s === "Under Review" ? "bg-amber-50 text-amber-700 border-amber-300"
-    : s === "Rejected" ? "bg-rose-50 text-rose-700 border-rose-300"
-    : "bg-slate-50 text-slate-700 border-slate-300";
+    s === "Completed" ? "bg-[#d4a94c]/15 text-[#f0d68a] border-[#d4a94c]/40"
+    : s === "On Progress" ? "bg-[#1fb6a8]/15 text-[#5fe8d8] border-[#1fb6a8]/40"
+    : s === "Under Review" ? "bg-[#d4a94c]/15 text-[#d4a94c] border-[#d4a94c]/40"
+    : s === "Rejected" ? "bg-rose-500/15 text-rose-300 border-rose-500/40"
+    : "bg-[#16304f] text-[#8fa3bd] border-[#8fa3bd]/30";
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col font-sans">
+    <div className="min-h-screen bg-[#050b16] text-[#f8fafc] flex flex-col font-body selection:bg-[#1fb6a8] selection:text-[#050b16]">
+      {/* Password modal */}
       <PasswordModal isOpen={pwModalOpen} onClose={() => setPwModalOpen(false)} onSubmit={(pw) => pwModalCallback?.(pw)} title={pwModalTitle} description={pwModalDesc} error={pwModalError} isLoading={pwModalLoading} mode={pwModalMode} />
 
       {/* Share link modal */}
       {showShareModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowShareModal(false)} />
-          <div className="relative bg-white rounded-2xl shadow-2xl p-6 max-w-md w-full z-10 space-y-4">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-md" onClick={() => setShowShareModal(false)} />
+          <div className="relative bg-[#101f36] border border-[#8fa3bd]/20 rounded-2xl shadow-2xl p-6 max-w-md w-full z-10 space-y-4 text-white">
             <div className="text-center">
-              <div className="w-14 h-14 bg-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-3"><Share2 className="w-7 h-7 text-indigo-600" /></div>
-              <h2 className="text-lg font-bold text-slate-900">Link View-Only</h2>
-              <p className="text-xs text-slate-500 mt-1">Bagikan link ini untuk akses baca saja (tanpa bisa edit). Tidak perlu password.</p>
+              <div className="w-14 h-14 bg-[#16304f] border border-[#d4a94c]/30 rounded-2xl flex items-center justify-center mx-auto mb-3 text-[#f0d68a]"><Share2 className="w-7 h-7 text-[#1fb6a8]" /></div>
+              <h2 className="font-display text-xl font-bold text-white tracking-wide">Link View-Only</h2>
+              <p className="text-xs text-[#8fa3bd] mt-1 font-body">Bagikan link ini untuk akses baca saja (tanpa bisa edit). Tidak perlu password.</p>
             </div>
             <div className="flex gap-2">
-              <input type="text" readOnly value={shareUrl} className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-xs bg-slate-50 font-mono" />
-              <button onClick={() => { navigator.clipboard.writeText(shareUrl); alert("Link disalin!"); }} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2 rounded-lg cursor-pointer shrink-0">Salin</button>
+              <input type="text" readOnly value={shareUrl} className="flex-1 bg-[#16304f] border border-[#8fa3bd]/30 rounded-xl px-3 py-2 text-xs text-white font-mono" />
+              <button onClick={() => { navigator.clipboard.writeText(shareUrl); alert("Link disalin!"); }} className="btn-gold text-xs px-4 py-2 cursor-pointer shrink-0">Salin</button>
             </div>
-            <button onClick={() => setShowShareModal(false)} className="w-full text-center text-xs text-slate-500 hover:text-slate-700 cursor-pointer py-1">Tutup</button>
+            <button onClick={() => setShowShareModal(false)} className="w-full text-center text-xs text-[#8fa3bd] hover:text-white cursor-pointer py-1">Tutup</button>
           </div>
         </div>
       )}
 
       <OnboardingGuide />
 
-      <header className="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-30 shadow-md">
+      {/* ════════ TOPBAR BRAND HEADER ════════ */}
+      <header className="bg-[#0d1b30] border-b border-[#8fa3bd]/16 sticky top-0 z-30 shadow-xl backdrop-blur-md bg-opacity-95">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-4">
-          <div onClick={goBackToList} className="flex items-center gap-3 cursor-pointer group">
-            <div className="p-2 bg-gradient-to-tr from-indigo-600 to-blue-500 rounded-lg shadow-md group-hover:scale-105 transition-transform"><Sparkles className="w-5 h-5 text-white" /></div>
-            <div><span className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider block">KAIZEN PDCA 8 LANGKAH</span><h1 className="text-sm sm:text-base font-extrabold tracking-tight">Dokumentasi Improvement</h1></div>
-          </div>
-          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-            {viewMode !== "list" && <button onClick={goBackToList} className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1.5 cursor-pointer"><ArrowLeft className="w-4 h-4" /><span className="hidden sm:inline">Proyek Saya</span></button>}
-            <button onClick={handleCreateProject} className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-md cursor-pointer"><Plus className="w-4 h-4" /><span className="hidden sm:inline">Baru</span></button>
-            {templates.length > 0 && <button onClick={() => setShowTemplates(!showTemplates)} className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1 cursor-pointer"><BookTemplate className="w-3.5 h-3.5" /></button>}
-            <Link href="/genba" className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1" title="Genba Harian"><ClipboardCheck className="w-3.5 h-3.5" /></Link>
-            <Link href="/admin" className="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center gap-1"><Shield className="w-3.5 h-3.5" /></Link>
+          {/* Logo Monogram */}
+          <BrandMonogram onClick={goToLanding} size="md" />
+
+          {/* Right Header Actions */}
+          <div className="flex items-center gap-2 sm:gap-3">
+            {viewMode !== "landing" && (
+              <button
+                onClick={goToLanding}
+                className="btn-ghost text-xs px-3 py-1.5 rounded-xl flex items-center gap-1.5 font-bold cursor-pointer"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                <span className="hidden sm:inline">Landing Hero</span>
+              </button>
+            )}
           </div>
         </div>
       </header>
 
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-4 sm:py-6">
-        {/* Templates */}
-        {showTemplates && viewMode === "list" && templates.length > 0 && (
-          <div className="bg-indigo-50 border-2 border-indigo-200 rounded-xl p-4 mb-6 space-y-3">
-            <div className="flex items-center justify-between"><h3 className="text-sm font-bold text-indigo-900 flex items-center gap-2"><BookTemplate className="w-4 h-4" /> Template</h3><button onClick={() => setShowTemplates(false)} className="text-xs text-slate-500 cursor-pointer">✕</button></div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {templates.map((t: any) => (
-                <button key={t.id} onClick={() => createFromTemplate(t.id)} className="bg-white rounded-lg p-3 border border-indigo-200 hover:border-indigo-400 hover:shadow-md text-left cursor-pointer transition-all">
-                  <p className="text-xs font-bold text-slate-900">{t.templateName || t.title}</p>
-                  <p className="text-[10px] text-slate-500">{t.department}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+      {/* ════════ MAIN CONTENT ════════ */}
+      <main className="flex-1 w-full">
 
-        {/* Create form */}
-        {showCreateForm && viewMode === "list" && (
-          <div className="bg-white rounded-xl shadow-lg border-2 border-indigo-200 p-4 sm:p-6 mb-6 space-y-4">
-            <div className="flex items-center justify-between"><h2 className="text-base font-bold text-slate-900 flex items-center gap-2"><Plus className="w-5 h-5 text-indigo-600" /> Buat Proyek Baru</h2><button onClick={() => setShowCreateForm(false)} className="text-xs text-slate-500 hover:text-rose-600 cursor-pointer">Batal ✕</button></div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="md:col-span-2"><label className="block text-xs font-semibold text-slate-700 mb-1">Nama / Tema <span className="text-rose-500">*</span></label><input type="text" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="e.g. Menurunkan Defect Burr" className="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" /></div>
-              <div><label className="block text-xs font-semibold text-slate-700 mb-1">Ketua Tim <span className="text-rose-500">*</span></label><input type="text" value={newLeader} onChange={(e) => setNewLeader(e.target.value)} placeholder="Nama Leader" className="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" /></div>
-              <div><label className="block text-xs font-semibold text-slate-700 mb-1">Departemen</label><input type="text" value={newDepartment} onChange={(e) => setNewDepartment(e.target.value)} placeholder="Produksi" className="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" /></div>
-              <div className="md:col-span-2"><label className="block text-xs font-semibold text-slate-700 mb-1">Anggota Tim</label><input type="text" value={newTeamMembers} onChange={(e) => setNewTeamMembers(e.target.value)} placeholder="Budi, Agus, Siti" className="w-full border border-slate-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" /></div>
-            </div>
-            <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={saveAsTemplate} onChange={(e) => setSaveAsTemplate(e.target.checked)} className="accent-indigo-600" /><span className="text-xs font-semibold text-slate-700">Simpan juga sebagai template</span></label>
-            {saveAsTemplate && <input type="text" value={templateName} onChange={(e) => setTemplateName(e.target.value)} placeholder="Nama template..." className="border border-slate-300 rounded px-2 py-1 text-xs w-full" />}
-            <div className="flex justify-end"><button onClick={submitNewProject} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-5 py-2.5 rounded-lg flex items-center gap-2 shadow cursor-pointer"><Lock className="w-4 h-4" /> Buat & Kunci</button></div>
-          </div>
-        )}
+        {/* ════════════════ VIEW MODE 1: HERO / LANDING PAGE ════════════════ */}
+        {viewMode === "landing" && (
+          <div className="w-full space-y-0">
+            {/* HERO SECTION */}
+            <section className="relative w-full py-12 sm:py-20 px-4 sm:px-6 overflow-hidden flex flex-col items-center justify-center text-center">
+              {/* Radial glow background */}
+              <div className="absolute top-1/4 right-10 w-96 h-96 bg-[#1fb6a8]/10 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute bottom-10 left-10 w-96 h-96 bg-[#d4a94c]/10 rounded-full blur-3xl pointer-events-none" />
 
-        {/* Join project form */}
-        {showJoinForm && viewMode === "list" && (
-          <div className="bg-white rounded-xl shadow-lg border-2 border-emerald-200 p-4 sm:p-6 mb-6 space-y-4">
-            <div className="flex items-center justify-between"><h2 className="text-base font-bold text-slate-900 flex items-center gap-2"><UserPlus className="w-5 h-5 text-emerald-600" /> Gabung ke Proyek</h2><button onClick={() => setShowJoinForm(false)} className="text-xs text-slate-500 hover:text-rose-600 cursor-pointer">Batal ✕</button></div>
-            <p className="text-xs text-slate-500">Masukkan ID proyek yang diberikan oleh pemilik proyek. Anda akan diminta memasukkan password untuk memverifikasi akses.</p>
-            <div className="flex gap-2">
-              <input type="text" value={joinProjectId} onChange={(e) => setJoinProjectId(e.target.value)} placeholder="ID Proyek (e.g. kz-1234567890-abcdef12)" className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-xs font-mono focus:ring-2 focus:ring-emerald-500 focus:outline-none" />
-              <button onClick={joinProject} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-lg cursor-pointer shrink-0">Verifikasi & Gabung</button>
-            </div>
-          </div>
-        )}
+              <div className="max-w-4xl mx-auto space-y-8 relative z-10 flex flex-col items-center">
+                {/* Eyebrow Pill */}
+                <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full border border-[#d4a94c]/40 bg-[#16304f]/60 text-[#f0d68a] text-xs font-bold uppercase tracking-widest font-body shadow-sm">
+                  <Sparkles className="w-3.5 h-3.5 text-[#f0d68a]" />
+                  PDCA · KAIZEN · SIKLUS PERBAIKAN
+                </div>
 
-        {/* ═══ LIST ═══ */}
-        {viewMode === "list" && (
-          <div className="space-y-4 sm:space-y-6">
-            {/* Action bar */}
-            <div className="bg-white p-3 sm:p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-3 sm:gap-4">
-              <div className="flex-1 min-w-[200px] relative"><Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" /><input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Cari proyek saya..." className="w-full bg-slate-50 border border-slate-300 rounded-lg pl-9 pr-4 py-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none" /></div>
-              <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-                <select value={departmentFilter} onChange={(e) => setDepartmentFilter(e.target.value)} className="bg-slate-50 border border-slate-300 rounded-lg px-2 sm:px-3 py-1.5 text-xs font-medium cursor-pointer"><option value="all">Semua Dept</option>{departmentsList.map((d) => <option key={d} value={d}>{d}</option>)}</select>
-                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="bg-slate-50 border border-slate-300 rounded-lg px-2 sm:px-3 py-1.5 text-xs font-medium cursor-pointer"><option value="all">Semua Status</option><option value="Draft">Draft</option><option value="On Progress">On Progress</option><option value="Under Review">Under Review</option><option value="Completed">Completed</option><option value="Rejected">Rejected</option></select>
-                <button onClick={() => setShowJoinForm(!showJoinForm)} className="bg-emerald-50 border border-emerald-300 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 cursor-pointer flex items-center gap-1" title="Gabung ke proyek orang lain"><UserPlus className="w-3.5 h-3.5" /><span className="hidden sm:inline">Gabung</span></button>
-                <button onClick={() => fetchProjects()} className="bg-slate-50 border border-slate-300 rounded-lg p-2 text-slate-600 hover:bg-indigo-50 cursor-pointer"><RefreshCw className="w-3.5 h-3.5" /></button>
-              </div>
-            </div>
+                {/* Main Headline */}
+                <div className="space-y-3 max-w-3xl">
+                  <h1 className="font-display text-4xl sm:text-6xl font-black text-white tracking-wide uppercase leading-tight sm:leading-none">
+                    SIKLUS <span className="text-[#5fe8d8]">KAIZEN</span> TIDAK PERNAH BERHENTI
+                  </h1>
+                  <p className="font-body text-sm sm:text-base text-[#8fa3bd] max-w-xl mx-auto leading-relaxed">
+                    Dokumentasikan setiap langkah perbaikan manufaktur dengan metode PDCA 8 Langkah. Terstruktur, aman, dan siap diexport ke PDF/Word.
+                  </p>
+                </div>
 
-            {isLoading ? (
-              <div className="text-center py-12 text-slate-500 text-sm"><RefreshCw className="w-5 h-5 mx-auto animate-spin mb-2" />Memuat...</div>
-            ) : projects.length === 0 && !showCreateForm && !showJoinForm ? (
-              <div className="bg-white rounded-2xl p-8 sm:p-12 text-center border-2 border-dashed border-slate-200 max-w-xl mx-auto space-y-4">
-                <div className="p-4 bg-indigo-50 rounded-full w-16 h-16 mx-auto flex items-center justify-center text-indigo-600"><FileCheck className="w-8 h-8" /></div>
-                <h3 className="font-bold text-slate-800 text-lg">Belum Ada Proyek</h3>
-                <p className="text-xs text-slate-500 leading-relaxed">Buat proyek Kaizen baru, gunakan template, atau gabung ke proyek yang sudah ada.</p>
-                <div className="flex flex-wrap gap-3 justify-center">
-                  <button onClick={handleCreateProject} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-4 py-2.5 rounded-lg inline-flex items-center gap-2 shadow-md cursor-pointer"><Plus className="w-4 h-4" /> Buat Proyek Baru</button>
-                  <button onClick={() => setShowJoinForm(true)} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2.5 rounded-lg inline-flex items-center gap-2 shadow-md cursor-pointer"><UserPlus className="w-4 h-4" /> Gabung ke Proyek</button>
+                {/* Animated PDCA Ring Illustration */}
+                <HeroPdcaIllustration />
+
+                {/* CTA Hierarchy Section */}
+                <div className="w-full max-w-md space-y-4 pt-4">
+                  {/* Primary CTA Button: BIG Solid Gold Button */}
+                  <button
+                    onClick={handleCreateProject}
+                    className="w-full btn-gold py-4 text-base sm:text-lg uppercase tracking-wider font-extrabold flex items-center justify-center gap-2 shadow-2xl cursor-pointer"
+                  >
+                    <span>Buat Proyek Baru</span>
+                    <ArrowRight className="w-5 h-5 stroke-[3]" />
+                  </button>
+
+                  {/* Secondary CTA: Search Pill Input */}
+                  <div className="relative w-full">
+                    <Search className="w-4 h-4 text-[#8fa3bd] absolute left-4 top-3.5" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value);
+                        setViewMode("list");
+                      }}
+                      onFocus={() => {
+                        setViewMode("list");
+                      }}
+                      placeholder="Cari nama proyek..."
+                      className="w-full bg-[#101f36]/80 border border-[#8fa3bd]/25 rounded-full pl-11 pr-4 py-2.5 text-xs text-white placeholder-[#8fa3bd]/60 focus:outline-none focus:border-[#5fe8d8] focus:ring-1 focus:ring-[#5fe8d8] transition-all shadow-inner font-body"
+                    />
+                  </div>
+
+                  {/* Quick link to view my projects list */}
+                  {getMyProjectIds().length > 0 && (
+                    <button
+                      onClick={() => setViewMode("list")}
+                      className="text-xs text-[#5fe8d8] hover:underline font-bold flex items-center justify-center gap-1 mx-auto cursor-pointer"
+                    >
+                      Lihat {getMyProjectIds().length} Proyek Saya <ArrowUpRight className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
-                {projects.map((proj: any) => (
-                  <div key={proj.id} onClick={() => openProject(proj.id, "edit")} className="bg-white rounded-xl shadow-sm border border-slate-200 hover:border-indigo-400 hover:shadow-md transition-all cursor-pointer p-4 sm:p-5 flex flex-col justify-between group">
-                    <div>
-                      <div className="flex items-center justify-between mb-2 gap-1 flex-wrap">
-                        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-slate-100 text-slate-600 rounded">{proj.department || "Produksi"}</span>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <DeadlineBadge dueDate={proj.dueDate} status={proj.status} />
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${statusBadgeClass(proj.status)}`}>{proj.status}</span>
-                        </div>
-                      </div>
-                      <h3 className="font-bold text-slate-900 text-sm line-clamp-2 group-hover:text-indigo-600 transition-colors mb-2">{proj.title || "Tanpa Judul"}</h3>
-                      <div className="text-xs text-slate-500 space-y-0.5 font-medium mb-3">
-                        <p>PIC: {proj.leader || "-"} • Step {proj.currentStep || 1}/8</p>
-                        {proj.dueDate && <p>Due: {proj.dueDate}</p>}
-                      </div>
-                    </div>
-                    <div className="border-t border-slate-100 pt-2.5 flex items-center justify-between">
-                      <button onClick={(e) => { e.stopPropagation(); openProject(proj.id, "preview"); }} className="text-xs font-semibold text-slate-600 hover:text-indigo-600 flex items-center gap-1"><Eye className="w-3.5 h-3.5" /> Pratinjau</button>
-                      <div className="flex items-center gap-1">
-                        <button onClick={(e) => duplicateProject(proj.id, e)} className="p-1.5 text-slate-400 hover:text-indigo-600 rounded hover:bg-indigo-50" title="Duplikasi"><Copy className="w-4 h-4" /></button>
-                        <button onClick={(e) => deleteProject(proj.id, e)} className="p-1.5 text-slate-400 hover:text-rose-600 rounded hover:bg-rose-50" title="Hapus"><Trash2 className="w-4 h-4" /></button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+            </section>
+
+            {/* SECTION 3B: INFORMASI UMUM (Story / Author Section) */}
+            <AboutSection onStartClick={handleCreateProject} />
           </div>
         )}
 
-        {/* ═══ EDIT ═══ */}
-        {viewMode === "edit" && activeProject && (
-          <div className="space-y-4">
-            <div className="bg-white px-3 sm:px-4 py-3 rounded-xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-                <button onClick={goBackToList} className="text-xs font-semibold text-slate-600 hover:text-indigo-600 flex items-center gap-1 cursor-pointer"><ArrowLeft className="w-4 h-4" /> Kembali</button>
-                <span className="hidden sm:inline h-4 w-[1px] bg-slate-300" />
-                <span className="text-xs font-bold text-slate-800">Step {activeStep}/7</span>
-                {autoSaveStatus === "saving" && <span className="text-[11px] text-amber-600 font-semibold flex items-center gap-1 animate-pulse"><Clock className="w-3 h-3" /> Menyimpan...</span>}
-                {autoSaveStatus === "saved" && <span className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Tersimpan ✓</span>}
-                {isDirty && autoSaveStatus === "idle" && <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1"><Edit3 className="w-3 h-3" /> Belum disimpan</span>}
+        {/* ════════════════ DASHBOARD / APP SHELL (List / Edit / Preview) ════════════════ */}
+        {viewMode !== "landing" && (
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+
+            {/* NAVBAR TOOLBAR */}
+            {viewMode === "list" && (
+              <div className="bg-[#101f36] p-4 rounded-2xl border border-[#8fa3bd]/16 shadow-lg flex flex-wrap items-center justify-between gap-4">
+                {/* Search Field */}
+                <div className="flex-1 min-w-[220px] relative">
+                  <Search className="w-4 h-4 text-[#8fa3bd] absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Cari proyek saya..."
+                    className="w-full bg-[#16304f] border border-[#8fa3bd]/25 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-[#8fa3bd]/50 focus:outline-none focus:border-[#5fe8d8]"
+                  />
+                </div>
+
+                {/* Directory Toggle & Filters */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1 bg-[#16304f] p-1 rounded-xl border border-[#8fa3bd]/25">
+                    <button
+                      onClick={() => setListFilterMode("all")}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        listFilterMode === "all" ? "bg-[#1fb6a8] text-[#050b16] shadow-xs" : "text-[#8fa3bd] hover:text-white"
+                      }`}
+                    >
+                      Semua Publik
+                    </button>
+                    <button
+                      onClick={() => setListFilterMode("mine")}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        listFilterMode === "mine" ? "bg-[#1fb6a8] text-[#050b16] shadow-xs" : "text-[#8fa3bd] hover:text-white"
+                      }`}
+                    >
+                      Proyek Saya ({getMyProjectIds().length})
+                    </button>
+                  </div>
+
+                  <select
+                    value={departmentFilter}
+                    onChange={(e) => setDepartmentFilter(e.target.value)}
+                    className="bg-[#16304f] border border-[#8fa3bd]/25 text-white text-xs rounded-xl px-3 py-2 font-medium cursor-pointer"
+                  >
+                    <option value="all">Semua Dept</option>
+                    {departmentsList.map((d) => <option key={d} value={d} className="bg-[#0d1b30]">{d}</option>)}
+                  </select>
+
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="bg-[#16304f] border border-[#8fa3bd]/25 text-white text-xs rounded-xl px-3 py-2 font-medium cursor-pointer"
+                  >
+                    <option value="all">Semua Status</option>
+                    <option value="Draft" className="bg-[#0d1b30]">Draft</option>
+                    <option value="On Progress" className="bg-[#0d1b30]">On Progress</option>
+                    <option value="Under Review" className="bg-[#0d1b30]">Under Review</option>
+                    <option value="Completed" className="bg-[#0d1b30]">Completed</option>
+                    <option value="Rejected" className="bg-[#0d1b30]">Rejected</option>
+                  </select>
+
+                  <button
+                    onClick={() => fetchProjects()}
+                    className="btn-ghost p-2 rounded-xl text-[#8fa3bd] hover:text-[#5fe8d8] cursor-pointer"
+                    title="Refresh"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+
+                  {/* Vertical Divider */}
+                  <div className="h-5 w-[1px] bg-[#8fa3bd]/20 mx-1" />
+
+                  {/* Account status & Gabung button */}
+                  <span className="text-[11px] text-[#8fa3bd] font-medium hidden sm:inline">
+                    Masuk sebagai Tamu
+                  </span>
+
+                  <button
+                    onClick={() => setShowJoinForm(!showJoinForm)}
+                    className="btn-ghost px-2.5 py-1.5 rounded-xl text-xs font-bold border-[#1fb6a8]/40 text-[#5fe8d8] flex items-center gap-1 cursor-pointer"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>Gabung</span>
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <button onClick={getShareLink} className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-200 flex items-center gap-1 cursor-pointer" title="Dapatkan link view-only"><Share2 className="w-3.5 h-3.5" /><span className="hidden sm:inline">Share</span></button>
-                <span className="text-[10px] text-slate-400 font-mono hidden lg:inline" title="ID Proyek — bagikan ke rekan untuk Join">{activeProject.id}</span>
-                <button onClick={() => saveProject(activeProject, true)} className="bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold px-3 py-1.5 rounded-lg border border-indigo-200 flex items-center gap-1.5 cursor-pointer"><Save className="w-4 h-4" /><span className="hidden sm:inline">Simpan</span></button>
-                <button onClick={switchToPreview} className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 shadow-sm cursor-pointer"><Eye className="w-4 h-4" /><span className="hidden sm:inline">Pratinjau</span></button>
-              </div>
-            </div>
+            )}
 
-            <HeaderCard header={activeProject.content.header} onChange={updateHeader} />
-            <WizardStepsNav activeStep={activeStep} onSelectStep={setActiveStep} validations={stepValidations} />
-
-            <div>
-              {activeStep === 1 && <Step1Editor data={activeProject.content.step1} onChange={(d) => updateContentStep("step1", d)} />}
-              {activeStep === 2 && <Step2Editor data={activeProject.content.step2} onChange={(d) => updateContentStep("step2", d)} />}
-              {activeStep === 3 && <Step3Editor data={activeProject.content.step3} onChange={(d) => updateContentStep("step3", d)} />}
-              {activeStep === 4 && <Step4Editor data={activeProject.content.step4} onChange={(d) => updateContentStep("step4", d)} />}
-              {activeStep === 5 && <Step5And6Editor data={activeProject.content.step5_6} onChange={(d) => updateContentStep("step5_6", d)} />}
-              {activeStep === 6 && <Step7Editor data={activeProject.content.step7} onChange={(d) => updateContentStep("step7", d)} />}
-              {activeStep === 7 && <Step8Editor data={activeProject.content.step8} onChange={(d) => updateContentStep("step8", d)} />}
-            </div>
-
-            <RevisionHistory projectId={activeProject.id} projectPassword={unlockedPasswords[activeProject.id] || ""} />
-
-            {stepValidations.some((v) => !v.isComplete) && (
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                <h4 className="text-xs font-bold text-amber-900 mb-2 flex items-center gap-1"><AlertTriangle className="w-4 h-4" /> Langkah Belum Lengkap:</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
-                  {stepValidations.filter((v) => !v.isComplete).map((v) => (
-                    <button key={v.step} onClick={() => setActiveStep(v.step)} className="text-left text-xs text-amber-800 hover:text-indigo-700 cursor-pointer py-0.5">
-                      • Langkah {v.step} ({v.label}): {v.errors.join(", ")}
+            {/* Template picker banner */}
+            {showTemplates && viewMode === "list" && templates.length > 0 && (
+              <div className="bg-[#16304f] border border-[#d4a94c]/40 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-xs font-bold text-[#f0d68a] flex items-center gap-2 uppercase tracking-wider">
+                    <BookTemplate className="w-4 h-4 text-[#1fb6a8]" /> Template Kaizen Standar
+                  </h3>
+                  <button onClick={() => setShowTemplates(false)} className="text-xs text-[#8fa3bd] hover:text-white cursor-pointer">✕</button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {templates.map((t: any) => (
+                    <button
+                      key={t.id}
+                      onClick={() => createFromTemplate(t.id)}
+                      className="bg-[#101f36] rounded-xl p-3 border border-[#8fa3bd]/20 hover:border-[#1fb6a8] text-left cursor-pointer transition-all"
+                    >
+                      <p className="text-xs font-bold text-white">{t.templateName || t.title}</p>
+                      <p className="text-[10px] text-[#8fa3bd] mt-0.5">{t.department}</p>
                     </button>
                   ))}
                 </div>
               </div>
             )}
 
-            <div className="bg-white p-3 sm:p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-              <button disabled={activeStep === 1} onClick={() => setActiveStep((p) => Math.max(1, p - 1))} className="bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 text-xs font-bold px-3 sm:px-4 py-2 rounded-lg flex items-center gap-1.5 cursor-pointer"><ArrowLeft className="w-4 h-4" /> <span className="hidden sm:inline">Sebelumnya</span></button>
-              <span className="text-xs text-slate-500">{activeStep} / 7</span>
-              {activeStep < 7
-                ? <button onClick={() => setActiveStep((p) => Math.min(7, p + 1))} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 sm:px-4 py-2 rounded-lg flex items-center gap-1.5 shadow cursor-pointer"><span className="hidden sm:inline">Selanjutnya</span> <ArrowRight className="w-4 h-4" /></button>
-                : <button onClick={switchToPreview} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-3 sm:px-4 py-2 rounded-lg flex items-center gap-1.5 shadow cursor-pointer"><span className="hidden sm:inline">Selesai</span> <CheckCircle className="w-4 h-4" /></button>
-              }
-            </div>
-          </div>
-        )}
+            {/* Create project form */}
+            {showCreateForm && viewMode === "list" && (
+              <div className="bg-[#101f36] rounded-2xl shadow-xl border border-[#1fb6a8]/40 p-5 space-y-4 text-white">
+                <div className="flex items-center justify-between">
+                  <h2 className="font-display text-lg font-bold text-white flex items-center gap-2">
+                    <Plus className="w-5 h-5 text-[#1fb6a8]" /> Buat Proyek Baru
+                  </h2>
+                  <button onClick={() => setShowCreateForm(false)} className="text-xs text-[#8fa3bd] hover:text-rose-400 cursor-pointer">Batal ✕</button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-[#8fa3bd] mb-1">
+                      Nama / Tema Proyek <span className="text-[#1fb6a8]">*</span>
+                    </label>
+                    <input type="text" value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="e.g. Menurunkan Defect Burr" className="w-full bg-[#16304f] border border-[#8fa3bd]/30 rounded-xl p-2.5 text-xs text-white placeholder-[#8fa3bd]/50 focus:ring-2 focus:ring-[#1fb6a8] focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-[#8fa3bd] mb-1">
+                      Ketua Tim <span className="text-[#1fb6a8]">*</span>
+                    </label>
+                    <input type="text" value={newLeader} onChange={(e) => setNewLeader(e.target.value)} placeholder="Nama Leader" className="w-full bg-[#16304f] border border-[#8fa3bd]/30 rounded-xl p-2.5 text-xs text-white placeholder-[#8fa3bd]/50 focus:ring-2 focus:ring-[#1fb6a8] focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-[#8fa3bd] mb-1">Departemen</label>
+                    <input type="text" value={newDepartment} onChange={(e) => setNewDepartment(e.target.value)} placeholder="Produksi" className="w-full bg-[#16304f] border border-[#8fa3bd]/30 rounded-xl p-2.5 text-xs text-white placeholder-[#8fa3bd]/50 focus:ring-2 focus:ring-[#1fb6a8] focus:outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-[#8fa3bd] mb-1">Industri Pengguna</label>
+                    <select value={newIndustry} onChange={(e) => setNewIndustry(e.target.value)} className="w-full bg-[#16304f] border border-[#8fa3bd]/30 rounded-xl p-2.5 text-xs text-white focus:ring-2 focus:ring-[#1fb6a8] focus:outline-none cursor-pointer">
+                      <option value="Manufaktur" className="bg-[#0d1b30]">Manufaktur</option>
+                      <option value="F&B" className="bg-[#0d1b30]">F&B (Makanan &amp; Minuman)</option>
+                      <option value="Retail" className="bg-[#0d1b30]">Retail &amp; Perdagangan</option>
+                      <option value="Jasa" className="bg-[#0d1b30]">Jasa / Layanan</option>
+                      <option value="Lainnya" className="bg-[#0d1b30]">Lainnya</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-[#8fa3bd] mb-1">Anggota Tim</label>
+                    <input type="text" value={newTeamMembers} onChange={(e) => setNewTeamMembers(e.target.value)} placeholder="Budi, Agus, Siti" className="w-full bg-[#16304f] border border-[#8fa3bd]/30 rounded-xl p-2.5 text-xs text-white placeholder-[#8fa3bd]/50 focus:ring-2 focus:ring-[#1fb6a8] focus:outline-none" />
+                  </div>
+                </div>
+                <label className="flex items-center gap-2 cursor-pointer pt-2">
+                  <input type="checkbox" checked={saveAsTemplate} onChange={(e) => setSaveAsTemplate(e.target.checked)} className="accent-[#1fb6a8]" />
+                  <span className="text-xs font-medium text-slate-300">Simpan juga sebagai template publik</span>
+                </label>
+                {saveAsTemplate && (
+                  <input type="text" value={templateName} onChange={(e) => setTemplateName(e.target.value)} placeholder="Nama template..." className="bg-[#16304f] border border-[#8fa3bd]/30 rounded-xl p-2 text-xs text-white w-full" />
+                )}
+                <div className="flex justify-end">
+                  <button onClick={submitNewProject} className="btn-gold text-xs px-5 py-2.5 flex items-center gap-2 cursor-pointer">
+                    <Lock className="w-4 h-4" /> Buat &amp; Kunci Dokumen
+                  </button>
+                </div>
+              </div>
+            )}
 
-        {/* ═══ PREVIEW ═══ */}
-        {viewMode === "preview" && activeProject && (
-          <KaizenReportView project={activeProject} onEditClick={() => setViewMode("edit")} />
+            {/* Join form */}
+            {showJoinForm && viewMode === "list" && (
+              <div className="bg-[#101f36] rounded-2xl shadow-xl border border-[#1fb6a8]/40 p-5 space-y-4 text-white">
+                <div className="flex items-center justify-between">
+                  <h2 className="font-display text-lg font-bold text-white flex items-center gap-2">
+                    <UserPlus className="w-5 h-5 text-[#5fe8d8]" /> Gabung ke Proyek
+                  </h2>
+                  <button onClick={() => setShowJoinForm(false)} className="text-xs text-[#8fa3bd] hover:text-rose-400 cursor-pointer">Batal ✕</button>
+                </div>
+                <p className="text-xs text-[#8fa3bd]">Masukkan ID proyek yang diberikan oleh pemilik proyek. Anda akan diminta memasukkan password untuk memverifikasi akses.</p>
+                <div className="flex gap-2">
+                  <input type="text" value={joinProjectId} onChange={(e) => setJoinProjectId(e.target.value)} placeholder="ID Proyek (e.g. kz-1234567890-abcdef12)" className="flex-1 bg-[#16304f] border border-[#8fa3bd]/30 rounded-xl px-3 py-2 text-xs font-mono text-white focus:ring-2 focus:ring-[#1fb6a8] focus:outline-none" />
+                  <button onClick={joinProject} className="btn-gold text-xs px-4 py-2 cursor-pointer shrink-0">Verifikasi &amp; Gabung</button>
+                </div>
+              </div>
+            )}
+
+            {/* ═══ PROJECT CARDS GRID ═══ */}
+            {viewMode === "list" && (
+              <div className="space-y-4">
+                {isLoading ? (
+                  <div className="text-center py-16 text-[#8fa3bd] text-sm">
+                    <RefreshCw className="w-6 h-6 mx-auto animate-spin mb-2 text-[#1fb6a8]" />
+                    Memuat proyek saya...
+                  </div>
+                ) : projects.length === 0 && !showCreateForm && !showJoinForm ? (
+                  <div className="bg-[#101f36] rounded-2xl p-10 text-center border border-[#8fa3bd]/16 max-w-xl mx-auto space-y-4 shadow-xl">
+                    <div className="p-4 bg-[#16304f] rounded-full w-16 h-16 mx-auto flex items-center justify-center text-[#f0d68a] border border-[#d4a94c]/30">
+                      <FileCheck className="w-8 h-8" />
+                    </div>
+                    <h3 className="font-display text-xl font-bold text-white">Belum Ada Proyek di Daftar Anda</h3>
+                    <p className="text-xs text-[#8fa3bd] leading-relaxed font-body">
+                      Buat proyek Kaizen baru, gunakan template standar, atau gabung ke proyek yang sudah ada lewat ID proyek.
+                    </p>
+                    <div className="flex flex-wrap gap-3 justify-center pt-2">
+                      <button onClick={handleCreateProject} className="btn-gold text-xs px-4 py-2.5 flex items-center gap-2 cursor-pointer">
+                        <Plus className="w-4 h-4" /> Buat Proyek Baru
+                      </button>
+                      <button onClick={() => setShowJoinForm(true)} className="btn-ghost text-xs px-4 py-2.5 rounded-xl border-[#1fb6a8]/40 text-[#5fe8d8] flex items-center gap-2 cursor-pointer">
+                        <UserPlus className="w-4 h-4" /> Gabung ke Proyek
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                    {projects.map((proj: any) => {
+                      const stepNum = proj.currentStep || 1;
+                      const progressPct = Math.round((stepNum / 8) * 100);
+
+                      return (
+                        <div
+                          key={proj.id}
+                          onClick={() => openProject(proj.id, "edit")}
+                          className="card-navy p-5 flex flex-col justify-between cursor-pointer group relative overflow-hidden"
+                        >
+                          {/* Top Accent Gradient Line */}
+                          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#1fb6a8] via-[#5fe8d8] to-[#d4a94c]" />
+
+                          <div>
+                            {/* Card Header Info */}
+                            <div className="flex items-center justify-between mb-3 gap-1 flex-wrap">
+                              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-[#16304f] text-[#8fa3bd] rounded-md border border-[#8fa3bd]/20">
+                                {proj.department || "Produksi"}
+                              </span>
+
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <DeadlineBadge dueDate={proj.dueDate} status={proj.status} />
+                                {hasMyProjectId(proj.id) && (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#1fb6a8]/20 text-[#5fe8d8] border border-[#1fb6a8]/40">
+                                    Milik Saya
+                                  </span>
+                                )}
+                                <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-[#d4a94c]/15 text-[#f0d68a] border border-[#d4a94c]/30 font-bold" title="ID Proyek">
+                                  {proj.id.substring(0, 10)}
+                                </span>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${statusBadgeClass(proj.status)}`}>
+                                  {proj.status}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Project Title */}
+                            <h3 className="font-display font-bold text-white text-lg line-clamp-2 group-hover:text-[#5fe8d8] transition-colors mb-3 tracking-wide">
+                              {proj.title || "Tanpa Judul"}
+                            </h3>
+
+                            <div className="text-xs text-[#8fa3bd] space-y-1 font-medium mb-4">
+                              <p>PIC: <strong className="text-slate-200">{proj.leader || "-"}</strong></p>
+                              <p>Langkah: <strong className="text-[#5fe8d8]">Langkah {stepNum} dari 8</strong></p>
+                            </div>
+
+                            {/* Progress bar */}
+                            <div className="space-y-1 mb-4">
+                              <div className="flex justify-between text-[10px] text-[#8fa3bd] font-bold">
+                                <span>Progress Dokumen</span>
+                                <span className="text-[#5fe8d8]">{progressPct}%</span>
+                              </div>
+                              <div className="w-full bg-[#16304f] h-2 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-gradient-to-r from-[#1fb6a8] to-[#5fe8d8] rounded-full transition-all duration-300"
+                                  style={{ width: `${progressPct}%` }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Card Footer Actions */}
+                          <div className="border-t border-[#8fa3bd]/15 pt-3 flex items-center justify-between">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); openProject(proj.id, "preview"); }}
+                              className="text-xs font-bold text-[#5fe8d8] hover:text-white flex items-center gap-1 transition-colors"
+                            >
+                              <Eye className="w-3.5 h-3.5" /> Pratinjau A3
+                            </button>
+
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={(e) => duplicateProject(proj.id, e)}
+                                className="p-1.5 text-[#8fa3bd] hover:text-[#5fe8d8] rounded-lg hover:bg-[#16304f] transition-colors cursor-pointer"
+                                title="Duplikasi Proyek"
+                              >
+                                <Copy className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={(e) => deleteProject(proj.id, e)}
+                                className="p-1.5 text-[#8fa3bd] hover:text-rose-400 rounded-lg hover:bg-rose-500/20 transition-colors cursor-pointer"
+                                title="Hapus Proyek (Perlu Password)"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ═══ EDIT MODE ═══ */}
+            {viewMode === "edit" && activeProject && (
+              <div className="space-y-4">
+                <div className="bg-[#101f36] px-4 py-3 rounded-2xl border border-[#8fa3bd]/16 shadow-xl flex flex-wrap items-center justify-between gap-3 text-white">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <button onClick={goBackToList} className="btn-ghost text-xs px-3 py-1.5 rounded-xl flex items-center gap-1 cursor-pointer">
+                      <ArrowLeft className="w-4 h-4" /> Proyek Saya
+                    </button>
+                    <span className="hidden sm:inline h-4 w-[1px] bg-[#8fa3bd]/20" />
+                    <span className="text-xs font-bold text-[#f0d68a]">Step {activeStep} / 7</span>
+                    <span title="Dokumen terkunci"><Lock className="w-3.5 h-3.5 text-[#1fb6a8]" /></span>
+                    {autoSaveStatus === "saving" && <span className="text-[11px] text-amber-300 font-semibold flex items-center gap-1 animate-pulse"><Clock className="w-3 h-3" /> Menyimpan...</span>}
+                    {autoSaveStatus === "saved" && <span className="text-[11px] text-[#5fe8d8] font-semibold flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Tersimpan ✓</span>}
+                    {isDirty && autoSaveStatus === "idle" && <span className="text-[11px] text-[#8fa3bd] font-medium flex items-center gap-1"><Edit3 className="w-3 h-3" /> Ada perubahan</span>}
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button onClick={getShareLink} className="btn-ghost text-xs px-3 py-1.5 rounded-xl flex items-center gap-1 cursor-pointer" title="Dapatkan link view-only">
+                      <Share2 className="w-3.5 h-3.5 text-[#1fb6a8]" />
+                      <span className="hidden sm:inline">Share</span>
+                    </button>
+                    <span className="text-[10px] text-[#8fa3bd] font-mono hidden lg:inline" title="ID Proyek">{activeProject.id}</span>
+                    <button onClick={() => saveProject(activeProject, true)} className="btn-ghost text-xs px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 cursor-pointer">
+                      <Save className="w-4 h-4 text-[#1fb6a8]" />
+                      <span className="hidden sm:inline">Simpan</span>
+                    </button>
+                    <button onClick={switchToPreview} className="btn-gold text-xs px-4 py-1.5 flex items-center gap-1.5 cursor-pointer">
+                      <Eye className="w-4 h-4" />
+                      <span className="hidden sm:inline">Pratinjau</span>
+                    </button>
+                  </div>
+                </div>
+
+                <HeaderCard header={activeProject.content.header} onChange={updateHeader} />
+                <WizardStepsNav activeStep={activeStep} onSelectStep={setActiveStep} validations={stepValidations} />
+
+                <div>
+                  {activeStep === 1 && <Step1Editor data={activeProject.content.step1} onChange={(d) => updateContentStep("step1", d)} />}
+                  {activeStep === 2 && <Step2Editor data={activeProject.content.step2} onChange={(d) => updateContentStep("step2", d)} />}
+                  {activeStep === 3 && <Step3Editor data={activeProject.content.step3} onChange={(d) => updateContentStep("step3", d)} />}
+                  {activeStep === 4 && <Step4Editor data={activeProject.content.step4} onChange={(d) => updateContentStep("step4", d)} />}
+                  {activeStep === 5 && <Step5And6Editor data={activeProject.content.step5_6} onChange={(d) => updateContentStep("step5_6", d)} />}
+                  {activeStep === 6 && <Step7Editor data={activeProject.content.step7} onChange={(d) => updateContentStep("step7", d)} />}
+                  {activeStep === 7 && <Step8Editor data={activeProject.content.step8} onChange={(d) => updateContentStep("step8", d)} />}
+                </div>
+
+                <RevisionHistory projectId={activeProject.id} projectPassword={unlockedPasswords[activeProject.id] || ""} />
+
+                {stepValidations.some((v) => !v.isComplete) && (
+                  <div className="bg-[#16304f] border border-[#d4a94c]/40 rounded-2xl p-4 space-y-2">
+                    <h4 className="text-xs font-bold text-[#f0d68a] flex items-center gap-1.5 uppercase tracking-wider">
+                      <AlertTriangle className="w-4 h-4 text-[#d4a94c]" /> Langkah Belum Lengkap:
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                      {stepValidations.filter((v) => !v.isComplete).map((v) => (
+                        <button key={v.step} onClick={() => setActiveStep(v.step)} className="text-left text-xs text-[#8fa3bd] hover:text-[#5fe8d8] cursor-pointer py-0.5">
+                          • Langkah {v.step} ({v.label}): {v.errors.join(", ")}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="bg-[#101f36] p-4 rounded-2xl border border-[#8fa3bd]/16 shadow-xl flex items-center justify-between">
+                  <button disabled={activeStep === 1} onClick={() => setActiveStep((p) => Math.max(1, p - 1))} className="btn-ghost text-xs font-bold px-4 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer disabled:opacity-40">
+                    <ArrowLeft className="w-4 h-4" /> <span className="hidden sm:inline">Sebelumnya</span>
+                  </button>
+                  <span className="text-xs text-[#8fa3bd] font-bold">{activeStep} / 7</span>
+                  {activeStep < 7 ? (
+                    <button onClick={() => setActiveStep((p) => Math.min(7, p + 1))} className="btn-gold text-xs px-4 py-2 flex items-center gap-1.5 cursor-pointer">
+                      <span className="hidden sm:inline">Selanjutnya</span> <ArrowRight className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <button onClick={switchToPreview} className="btn-gold text-xs px-4 py-2 flex items-center gap-1.5 cursor-pointer">
+                      <span className="hidden sm:inline">Selesai</span> <CheckCircle className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ═══ PREVIEW MODE ═══ */}
+            {viewMode === "preview" && activeProject && (
+              <KaizenReportView project={activeProject} onEditClick={() => setViewMode("edit")} />
+            )}
+          </div>
         )}
       </main>
 
-      <footer className="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-500 mt-8">
-        Kaizen PDCA 8 Langkah • <Link href="/admin" className="text-indigo-600 hover:underline">Admin</Link>
+      {/* ════════ FOOTER ════════ */}
+      <footer className="bg-[#0d1b30] border-t border-[#8fa3bd]/16 py-6 text-center text-xs text-[#8fa3bd] mt-16 space-y-2">
+        <p className="font-body">
+          KAIZEN PDCA 8 LANGKAH · DOKUMENTASI IMPROVEMENT MANUFAKTUR
+        </p>
+        <div>
+          <Link href="/admin" className="text-[#8fa3bd] hover:text-[#5fe8d8] transition-colors inline-flex items-center gap-1 font-semibold">
+            🔒 Admin
+          </Link>
+        </div>
       </footer>
     </div>
   );

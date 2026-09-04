@@ -1,11 +1,12 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
-import { Loader2, Plus, Trash2, Pencil, Check as CheckIcon, ArrowLeft } from "lucide-react";
+import React, { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { ArrowLeft, Pencil, Trash2, Plus, Save, X, Loader2, Settings } from "lucide-react";
+import { GenbaPasswordGate, useGenbaPassword } from "@/components/genba/GenbaPasswordGate";
 import { Toast } from "@/components/Toast";
-import { GenbaPasswordGate, useGenbaAuth } from "@/components/genba/GenbaPasswordGate";
 
-interface GenbaScheduleItemRow {
+interface ScheduleItemRow {
   id: string;
   sectionId: string;
   sectionTitle: string;
@@ -14,402 +15,322 @@ interface GenbaScheduleItemRow {
   point: string;
   standard: string;
   endMinutes: number;
-  isActive: boolean;
+  isActive: number;
 }
 
-interface ScheduleSectionGroup {
+interface SectionGroup {
   sectionId: string;
   sectionTitle: string;
-  items: GenbaScheduleItemRow[];
+  items: ScheduleItemRow[];
 }
 
-function pad2(n: number): string {
-  return String(n).padStart(2, "0");
+function groupBySection(rows: ScheduleItemRow[]): SectionGroup[] {
+  const order: string[] = [];
+  const map = new Map<string, SectionGroup>();
+  for (const row of rows) {
+    if (!map.has(row.sectionId)) {
+      map.set(row.sectionId, { sectionId: row.sectionId, sectionTitle: row.sectionTitle, items: [] });
+      order.push(row.sectionId);
+    }
+    map.get(row.sectionId)!.items.push(row);
+  }
+  return order.map((id) => map.get(id)!);
 }
 
 function minutesToHHMM(minutes: number): string {
-  return `${pad2(Math.floor(minutes / 60))}:${pad2(minutes % 60)}`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
-function hhmmToMinutes(hhmm: string): number | null {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
-  if (!match) return null;
-  const h = Number(match[1]);
-  const m = Number(match[2]);
-  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+function hhmmToMinutes(hhmm: string): number {
+  const [h, m] = hhmm.split(":").map((v) => Number(v) || 0);
   return h * 60 + m;
 }
 
 function slugify(text: string): string {
   const slug = text
-    .trim()
     .toLowerCase()
+    .trim()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
   return slug || "section-" + Date.now();
 }
 
-// Grouping lokal untuk data mentah dari /api/genba/schedule (GenbaScheduleItemRow,
-// bukan GenbaItem) — beda tipe dari groupGenbaItemsBySection di genbaItemGrouping.ts,
-// jadi tidak reuse fungsi itu. Urutan sudah dari API (sectionOrder → itemOrder).
-function groupBySection(items: GenbaScheduleItemRow[]): ScheduleSectionGroup[] {
-  const order: string[] = [];
-  const map = new Map<string, ScheduleSectionGroup>();
-  items.forEach((item) => {
-    if (!map.has(item.sectionId)) {
-      order.push(item.sectionId);
-      map.set(item.sectionId, { sectionId: item.sectionId, sectionTitle: item.sectionTitle, items: [] });
-    }
-    map.get(item.sectionId)!.items.push(item);
-  });
-  return order.map((id) => map.get(id)!);
+const NEW_SECTION_VALUE = "__new__";
+
+export default function GenbaPengaturanPage() {
+  return (
+    <GenbaPasswordGate>
+      <GenbaPengaturanContent />
+    </GenbaPasswordGate>
+  );
 }
 
 function GenbaPengaturanContent() {
-  const { genbaFetch } = useGenbaAuth();
-  const [items, setItems] = useState<GenbaScheduleItemRow[] | null>(null);
+  const genbaPassword = useGenbaPassword();
+
+  const [rows, setRows] = useState<ScheduleItemRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: "error" | "success" } | null>(null);
 
-  // Form tambah item
-  const [sectionMode, setSectionMode] = useState<"existing" | "new">("existing");
-  const [selectedSectionId, setSelectedSectionId] = useState("");
-  const [newSectionTitle, setNewSectionTitle] = useState("");
-  const [point, setPoint] = useState("");
-  const [standard, setStandard] = useState("");
-  const [deadlineTime, setDeadlineTime] = useState("08:00");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Edit item
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editPoint, setEditPoint] = useState("");
   const [editStandard, setEditStandard] = useState("");
-  const [editDeadline, setEditDeadline] = useState("");
+  const [editTime, setEditTime] = useState("08:00");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
 
-  const loadItems = useCallback(async () => {
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newSectionChoice, setNewSectionChoice] = useState("");
+  const [newSectionTitle, setNewSectionTitle] = useState("");
+  const [newPoint, setNewPoint] = useState("");
+  const [newStandard, setNewStandard] = useState("");
+  const [newTime, setNewTime] = useState("08:00");
+  const [isAdding, setIsAdding] = useState(false);
+
+  const loadSchedule = useCallback(async () => {
     setIsLoading(true);
-    setErrorMessage(null);
     try {
-      const res = await genbaFetch("/api/genba/schedule");
+      const res = await fetch("/api/genba/schedule", {
+        headers: { "x-genba-password": genbaPassword },
+      });
       const json = await res.json();
       if (json.success) {
-        setItems(json.data);
+        setRows(json.data);
       } else {
-        setErrorMessage(json.error || "Gagal memuat data checklist.");
+        setToast({ message: json.error || "Gagal memuat master checklist.", type: "error" });
       }
     } catch (err) {
       console.error("Load genba schedule error:", err);
-      setErrorMessage("Gagal menghubungi server.");
+      setToast({ message: "Gagal memuat, periksa koneksi internet Anda.", type: "error" });
     } finally {
       setIsLoading(false);
     }
-  }, [genbaFetch]);
+  }, [genbaPassword]);
 
   useEffect(() => {
-    loadItems();
-  }, [loadItems]);
+    loadSchedule();
+  }, [loadSchedule]);
 
-  const sections = items ? groupBySection(items) : [];
+  const sections = groupBySection(rows);
 
-  useEffect(() => {
-    if (sections.length > 0 && !selectedSectionId && sectionMode === "existing") {
-      setSelectedSectionId(sections[0].sectionId);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sections.length]);
-
-  const handleAddItem = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMessage(null);
-    setSuccessMessage(null);
-
-    const endMinutes = hhmmToMinutes(deadlineTime);
-    if (endMinutes === null) {
-      setErrorMessage("Format jam tenggat tidak valid.");
-      return;
-    }
-    if (!point.trim() || !standard.trim()) {
-      setErrorMessage("Point dan standar wajib diisi.");
-      return;
-    }
-
-    let sectionId: string;
-    let sectionTitle: string;
-
-    if (sectionMode === "new") {
-      if (!newSectionTitle.trim()) {
-        setErrorMessage("Nama section baru wajib diisi.");
-        return;
-      }
-      sectionTitle = newSectionTitle.trim();
-      sectionId = slugify(sectionTitle);
-    } else {
-      const found = sections.find((s) => s.sectionId === selectedSectionId);
-      if (!found) {
-        setErrorMessage("Pilih section terlebih dahulu.");
-        return;
-      }
-      sectionId = found.sectionId;
-      sectionTitle = found.sectionTitle;
-    }
-
-    setIsSubmitting(true);
-    try {
-      const res = await genbaFetch("/api/genba/schedule", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sectionId,
-          sectionTitle,
-          point: point.trim(),
-          standard: standard.trim(),
-          endMinutes,
-        }),
-      });
-      const json = await res.json();
-
-      if (json.success) {
-        setSuccessMessage("Item checklist berhasil ditambahkan.");
-        setPoint("");
-        setStandard("");
-        setDeadlineTime("08:00");
-        setNewSectionTitle("");
-        setSectionMode("existing");
-        setSelectedSectionId(sectionId);
-        await loadItems();
-      } else {
-        setErrorMessage(json.error || "Gagal menambah item checklist.");
-      }
-    } catch (err) {
-      console.error("Add genba schedule item error:", err);
-      setErrorMessage("Gagal menghubungi server.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const startEdit = (item: GenbaScheduleItemRow) => {
-    setEditingId(item.id);
-    setEditPoint(item.point);
-    setEditStandard(item.standard);
-    setEditDeadline(minutesToHHMM(item.endMinutes));
+  const startEdit = (row: ScheduleItemRow) => {
+    setConfirmDeleteId(null);
+    setEditingId(row.id);
+    setEditPoint(row.point);
+    setEditStandard(row.standard);
+    setEditTime(minutesToHHMM(row.endMinutes));
   };
 
   const cancelEdit = () => setEditingId(null);
 
-  const handleSaveEdit = async (id: string) => {
-    setErrorMessage(null);
-    const endMinutes = hhmmToMinutes(editDeadline);
-    if (endMinutes === null) {
-      setErrorMessage("Format jam tenggat tidak valid.");
-      return;
-    }
+  const saveEdit = async (id: string) => {
     if (!editPoint.trim() || !editStandard.trim()) {
-      setErrorMessage("Point dan standar wajib diisi.");
+      setToast({ message: "Point dan standar tidak boleh kosong.", type: "error" });
       return;
     }
 
     setIsSavingEdit(true);
     try {
-      const res = await genbaFetch(`/api/genba/schedule/${id}`, {
+      const res = await fetch(`/api/genba/schedule/${id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ point: editPoint.trim(), standard: editStandard.trim(), endMinutes }),
+        headers: { "Content-Type": "application/json", "x-genba-password": genbaPassword },
+        body: JSON.stringify({
+          point: editPoint.trim(),
+          standard: editStandard.trim(),
+          endMinutes: hhmmToMinutes(editTime),
+        }),
       });
       const json = await res.json();
-
       if (json.success) {
+        setRows((prev) => prev.map((r) => (r.id === id ? json.data : r)));
         setEditingId(null);
-        await loadItems();
       } else {
-        setErrorMessage(json.error || "Gagal menyimpan perubahan.");
+        setToast({ message: json.error || "Gagal menyimpan perubahan.", type: "error" });
       }
     } catch (err) {
-      console.error("Save genba schedule item error:", err);
-      setErrorMessage("Gagal menghubungi server.");
+      console.error("Save schedule item error:", err);
+      setToast({ message: "Gagal menyimpan, periksa koneksi internet Anda.", type: "error" });
     } finally {
       setIsSavingEdit(false);
     }
   };
 
-  const handleDelete = async (id: string, pointLabel: string) => {
-    const confirmed = confirm(
-      `Nonaktifkan item "${pointLabel}"?\n\nItem ini tidak akan muncul lagi di checklist entry BARU, tapi entry lama yang sudah memakainya tidak berubah sama sekali.`
-    );
-    if (!confirmed) return;
-
-    setErrorMessage(null);
+  const runDelete = async (id: string) => {
+    setIsDeleting(true);
     try {
-      const res = await genbaFetch(`/api/genba/schedule/${id}`, { method: "DELETE" });
+      const res = await fetch(`/api/genba/schedule/${id}`, {
+        method: "DELETE",
+        headers: { "x-genba-password": genbaPassword },
+      });
       const json = await res.json();
       if (json.success) {
-        await loadItems();
+        setRows((prev) => prev.filter((r) => r.id !== id));
+        setConfirmDeleteId(null);
+        setToast({ message: "Item checklist dinonaktifkan.", type: "success" });
       } else {
-        setErrorMessage(json.error || "Gagal menonaktifkan item.");
+        setToast({ message: json.error || "Gagal menonaktifkan item.", type: "error" });
       }
     } catch (err) {
-      console.error("Delete genba schedule item error:", err);
-      setErrorMessage("Gagal menghubungi server.");
+      console.error("Delete schedule item error:", err);
+      setToast({ message: "Gagal menghapus, periksa koneksi internet Anda.", type: "error" });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleAddItem = async () => {
+    const isNewSection = newSectionChoice === NEW_SECTION_VALUE;
+    const sectionTitle = isNewSection
+      ? newSectionTitle.trim()
+      : sections.find((s) => s.sectionId === newSectionChoice)?.sectionTitle || "";
+    const sectionId = isNewSection ? slugify(newSectionTitle) : newSectionChoice;
+
+    if (!newSectionChoice || !sectionTitle || !newPoint.trim() || !newStandard.trim()) {
+      setToast({ message: "Section, point, dan standar wajib diisi.", type: "error" });
+      return;
+    }
+
+    setIsAdding(true);
+    try {
+      const res = await fetch("/api/genba/schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-genba-password": genbaPassword },
+        body: JSON.stringify({
+          sectionId,
+          sectionTitle,
+          point: newPoint.trim(),
+          standard: newStandard.trim(),
+          endMinutes: hhmmToMinutes(newTime),
+        }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setRows((prev) => [...prev, json.data]);
+        setShowAddForm(false);
+        setNewSectionChoice("");
+        setNewSectionTitle("");
+        setNewPoint("");
+        setNewStandard("");
+        setNewTime("08:00");
+        setToast({ message: "Item checklist baru berhasil ditambahkan.", type: "success" });
+      } else {
+        setToast({ message: json.error || "Gagal menambah item.", type: "error" });
+      }
+    } catch (err) {
+      console.error("Add schedule item error:", err);
+      setToast({ message: "Gagal menambah, periksa koneksi internet Anda.", type: "error" });
+    } finally {
+      setIsAdding(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col font-sans">
-      <header className="bg-slate-900 text-white border-b border-slate-800 sticky top-0 z-30 shadow-md">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-3 flex items-center gap-3">
-          <a
-            href="/genba"
-            className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
-            title="Kembali ke Genba Harian"
-          >
-            <ArrowLeft className="w-4 h-4" />
-          </a>
-          <h1 className="text-lg font-bold tracking-tight">Pengaturan Checklist Genba</h1>
+    <div className="min-h-screen bg-slate-50 pb-16">
+      <div className="max-w-2xl mx-auto px-4 pt-6 space-y-4">
+        {toast && (
+          <div className="mb-2">
+            <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
+          </div>
+        )}
+
+        <Link
+          href="/genba"
+          className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-700"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" /> Kembali ke Checklist Harian
+        </Link>
+
+        <div className="bg-white rounded-2xl shadow-md border border-slate-200 p-5">
+          <div className="flex items-center gap-2 mb-1">
+            <Settings className="w-5 h-5 text-indigo-600" />
+            <h1 className="text-xl font-black text-slate-900">Pengaturan Master Checklist</h1>
+          </div>
+          <p className="text-xs text-slate-500">
+            Perubahan di sini hanya berlaku untuk entry baru yang dibuat setelahnya. Checklist yang sudah
+            tersimpan tidak ikut berubah.
+          </p>
         </div>
-      </header>
 
-      <main className="flex-1 max-w-3xl w-full mx-auto px-4 sm:px-6 py-4 sm:py-6 space-y-4">
-        {errorMessage && (
-          <Toast message={errorMessage} type="error" onClose={() => setErrorMessage(null)} />
-        )}
-        {successMessage && (
-          <Toast message={successMessage} type="success" duration={2500} onClose={() => setSuccessMessage(null)} />
-        )}
-
-        {/* Form tambah item */}
-        <form onSubmit={handleAddItem} className="bg-white rounded-xl shadow-md border border-slate-200 p-4 space-y-3">
-          <h2 className="text-sm font-bold text-slate-800">Tambah Item Checklist</h2>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Section</label>
-              <select
-                value={sectionMode === "new" ? "__new__" : selectedSectionId}
-                onChange={(e) => {
-                  if (e.target.value === "__new__") {
-                    setSectionMode("new");
-                  } else {
-                    setSectionMode("existing");
-                    setSelectedSectionId(e.target.value);
-                  }
-                }}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
-              >
-                {sections.map((s) => (
-                  <option key={s.sectionId} value={s.sectionId}>
-                    {s.sectionTitle}
-                  </option>
-                ))}
-                <option value="__new__">+ Section baru...</option>
-              </select>
-            </div>
-
-            {sectionMode === "new" && (
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Nama Section Baru</label>
-                <input
-                  type="text"
-                  value={newSectionTitle}
-                  onChange={(e) => setNewSectionTitle(e.target.value)}
-                  placeholder="Contoh: Kebersihan Toilet"
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
-                />
-              </div>
-            )}
-
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Jam Tenggat</label>
-              <input
-                type="time"
-                value={deadlineTime}
-                onChange={(e) => setDeadlineTime(e.target.value)}
-                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Point / Pertanyaan Checklist</label>
-            <input
-              type="text"
-              value={point}
-              onChange={(e) => setPoint(e.target.value)}
-              placeholder="Contoh: Area kerja bersih dan rapi"
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Standar</label>
-            <input
-              type="text"
-              value={standard}
-              onChange={(e) => setStandard(e.target.value)}
-              placeholder="Contoh: Tidak ada sampah/barang tidak perlu di area kerja"
-              className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-semibold text-xs px-4 py-2 rounded-lg flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-          >
-            {isSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
-            {isSubmitting ? "Menyimpan..." : "Tambah Item"}
-          </button>
-        </form>
-
-        {/* List item per section */}
         {isLoading ? (
-          <div className="bg-white rounded-xl shadow-md border border-slate-200 p-8 flex items-center justify-center text-slate-400 text-sm gap-2">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            Memuat checklist...
-          </div>
+          <div className="text-center text-sm text-slate-400 py-10">Memuat master checklist...</div>
         ) : (
           <>
             {sections.map((section) => (
-              <div key={section.sectionId} className="bg-white rounded-xl shadow-md border border-slate-200 p-4 space-y-2">
-                <h2 className="text-sm font-bold text-indigo-700">{section.sectionTitle}</h2>
-                <div className="space-y-2">
-                  {section.items.map((item) => (
-                    <div key={item.id} className="border border-slate-200 rounded-lg p-3">
-                      {editingId === item.id ? (
+              <div
+                key={section.sectionId}
+                className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden"
+              >
+                <div className="bg-slate-100 px-4 py-2 text-xs font-bold uppercase tracking-wide text-slate-600">
+                  {section.sectionTitle}
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {section.items.map((row) => (
+                    <div key={row.id} className="p-3">
+                      {editingId === row.id ? (
                         <div className="space-y-2">
                           <input
                             type="text"
                             value={editPoint}
                             onChange={(e) => setEditPoint(e.target.value)}
-                            className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            placeholder="Point checklist"
+                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
                           />
-                          <input
-                            type="text"
+                          <textarea
+                            rows={2}
                             value={editStandard}
                             onChange={(e) => setEditStandard(e.target.value)}
-                            className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                          />
-                          <input
-                            type="time"
-                            value={editDeadline}
-                            onChange={(e) => setEditDeadline(e.target.value)}
-                            className="border border-slate-300 rounded-lg px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            placeholder="Standar"
+                            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm resize-vertical focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
                           />
                           <div className="flex items-center gap-2">
+                            <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">
+                              Jam Tenggat
+                            </label>
+                            <input
+                              type="time"
+                              value={editTime}
+                              onChange={(e) => setEditTime(e.target.value)}
+                              className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
+                            />
+                          </div>
+                          <div className="flex gap-2 pt-1">
                             <button
-                              type="button"
-                              onClick={() => handleSaveEdit(item.id)}
+                              onClick={() => saveEdit(row.id)}
                               disabled={isSavingEdit}
-                              className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1 cursor-pointer"
+                              className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white text-xs font-bold py-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors"
                             >
-                              <CheckIcon className="w-3.5 h-3.5" />
+                              {isSavingEdit ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                               Simpan
                             </button>
                             <button
-                              type="button"
                               onClick={cancelEdit}
-                              className="text-xs font-semibold px-3 py-1.5 rounded-lg text-slate-600 hover:bg-slate-100 cursor-pointer"
+                              className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold py-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors"
+                            >
+                              <X className="w-3.5 h-3.5" /> Batal
+                            </button>
+                          </div>
+                        </div>
+                      ) : confirmDeleteId === row.id ? (
+                        <div className="bg-rose-50 border border-rose-200 rounded-lg p-3 space-y-2">
+                          <p className="text-xs text-rose-700 font-semibold">
+                            Nonaktifkan &quot;{row.point}&quot;? Checklist yang sudah memakai item ini tidak akan berubah.
+                          </p>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => runDelete(row.id)}
+                              disabled={isDeleting}
+                              className="flex-1 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-300 text-white text-xs font-bold py-2 rounded-lg flex items-center justify-center gap-1.5 transition-colors"
+                            >
+                              {isDeleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                              Ya, Nonaktifkan
+                            </button>
+                            <button
+                              onClick={() => setConfirmDeleteId(null)}
+                              className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold py-2 rounded-lg transition-colors"
                             >
                               Batal
                             </button>
@@ -417,24 +338,25 @@ function GenbaPengaturanContent() {
                         </div>
                       ) : (
                         <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-slate-800">{item.point}</p>
-                            <p className="text-xs text-slate-500 mt-0.5">Standar: {item.standard}</p>
-                            <p className="text-xs text-slate-400 mt-0.5">Tenggat: {minutesToHHMM(item.endMinutes)}</p>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-slate-900">{row.point}</p>
+                            <p className="text-xs text-slate-500 mt-0.5">Standar: {row.standard}</p>
+                            <p className="text-[11px] font-mono text-slate-400 mt-1">s.d. {minutesToHHMM(row.endMinutes)}</p>
                           </div>
-                          <div className="flex items-center gap-1 shrink-0">
+                          <div className="flex gap-1.5 shrink-0">
                             <button
-                              type="button"
-                              onClick={() => startEdit(item)}
-                              className="text-slate-400 hover:text-indigo-600 p-1.5 rounded-lg hover:bg-slate-100"
+                              onClick={() => startEdit(row)}
+                              className="p-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-600 transition-colors"
                               title="Edit"
                             >
                               <Pencil className="w-3.5 h-3.5" />
                             </button>
                             <button
-                              type="button"
-                              onClick={() => handleDelete(item.id, item.point)}
-                              className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-slate-100"
+                              onClick={() => {
+                                setEditingId(null);
+                                setConfirmDeleteId(row.id);
+                              }}
+                              className="p-2 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-600 transition-colors"
                               title="Nonaktifkan"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -448,22 +370,92 @@ function GenbaPengaturanContent() {
               </div>
             ))}
 
-            {sections.length === 0 && (
-              <div className="bg-white rounded-xl shadow-md border border-slate-200 p-8 text-center text-sm text-slate-500">
-                Belum ada item checklist aktif.
-              </div>
-            )}
+            {/* Form tambah item */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+              {!showAddForm ? (
+                <button
+                  onClick={() => setShowAddForm(true)}
+                  className="w-full flex items-center justify-center gap-1.5 text-sm font-bold text-indigo-700 py-2"
+                >
+                  <Plus className="w-4 h-4" /> Tambah Item Checklist
+                </button>
+              ) : (
+                <div className="space-y-2.5">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1">
+                      Section
+                    </label>
+                    <select
+                      value={newSectionChoice}
+                      onChange={(e) => setNewSectionChoice(e.target.value)}
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
+                    >
+                      <option value="">Pilih section...</option>
+                      {sections.map((s) => (
+                        <option key={s.sectionId} value={s.sectionId}>
+                          {s.sectionTitle}
+                        </option>
+                      ))}
+                      <option value={NEW_SECTION_VALUE}>+ Section baru</option>
+                    </select>
+                  </div>
+
+                  {newSectionChoice === NEW_SECTION_VALUE && (
+                    <input
+                      type="text"
+                      value={newSectionTitle}
+                      onChange={(e) => setNewSectionTitle(e.target.value)}
+                      placeholder="Nama section baru"
+                      className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
+                    />
+                  )}
+
+                  <input
+                    type="text"
+                    value={newPoint}
+                    onChange={(e) => setNewPoint(e.target.value)}
+                    placeholder="Point checklist"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
+                  />
+                  <textarea
+                    rows={2}
+                    value={newStandard}
+                    onChange={(e) => setNewStandard(e.target.value)}
+                    placeholder="Standar"
+                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm resize-vertical focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
+                  />
+                  <div className="flex items-center gap-2">
+                    <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Jam Tenggat</label>
+                    <input
+                      type="time"
+                      value={newTime}
+                      onChange={(e) => setNewTime(e.target.value)}
+                      className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      onClick={handleAddItem}
+                      disabled={isAdding}
+                      className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white text-sm font-bold py-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      {isAdding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                      Tambah
+                    </button>
+                    <button
+                      onClick={() => setShowAddForm(false)}
+                      className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-sm font-bold py-2.5 rounded-lg transition-colors"
+                    >
+                      Batal
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </>
         )}
-      </main>
+      </div>
     </div>
-  );
-}
-
-export default function GenbaPengaturanPage() {
-  return (
-    <GenbaPasswordGate verifyUrl="/api/genba/schedule">
-      <GenbaPengaturanContent />
-    </GenbaPasswordGate>
   );
 }

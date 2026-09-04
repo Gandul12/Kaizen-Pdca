@@ -6,6 +6,8 @@ import { generateKaizenDocx } from "@/lib/docxExport";
 import { exportElementToPdf, estimateTotalImagesSize } from "@/lib/pdfExport";
 import { Toast } from "@/components/Toast";
 import { FishboneDiagramView } from "@/components/FishboneDiagramView";
+import { PptxExportModal } from "@/components/PptxExportModal";
+import { generateChartInsight } from "@/lib/chartInsight";
 import {
   FileText,
   Download,
@@ -14,10 +16,14 @@ import {
   Eye,
   Loader2,
   AlertTriangle,
+  TrendingUp,
+  Presentation,
 } from "lucide-react";
 import {
   LineChart,
   Line,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -38,6 +44,7 @@ export const KaizenReportView: React.FC<KaizenReportViewProps> = ({
   const [isExportingDocx, setIsExportingDocx] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [showPptxModal, setShowPptxModal] = useState(false);
 
   const imgInfo = estimateTotalImagesSize(project);
 
@@ -145,10 +152,10 @@ export const KaizenReportView: React.FC<KaizenReportViewProps> = ({
       )}
 
       {/* ═══ Top Action Bar (NOT captured in PDF) ═══ */}
-      <div className="bg-white p-4 rounded-xl shadow-md border border-slate-200 flex flex-wrap items-center justify-between gap-3 print:hidden">
+      <div className="bg-[#101f36] p-4 rounded-2xl shadow-xl border border-[#8fa3bd]/16 flex flex-wrap items-center justify-between gap-3 print:hidden">
         <div className="flex items-center gap-2">
-          <Eye className="w-5 h-5 text-indigo-600" />
-          <h2 className="font-bold text-slate-800 text-base">
+          <Eye className="w-5 h-5 text-[#1fb6a8]" />
+          <h2 className="font-display font-extrabold text-white text-lg tracking-wide">
             Pratinjau Laporan Kaizen A3
           </h2>
         </div>
@@ -157,16 +164,16 @@ export const KaizenReportView: React.FC<KaizenReportViewProps> = ({
           {onEditClick && (
             <button
               onClick={onEditClick}
-              className="bg-slate-100 hover:bg-slate-200 text-slate-800 font-semibold text-xs px-3.5 py-2 rounded-lg border border-slate-300 flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="bg-[#16304f] hover:bg-[#16304f]/80 text-[#8fa3bd] hover:text-white font-semibold text-xs px-3.5 py-2 rounded-xl border border-[#8fa3bd]/25 flex items-center gap-1.5 transition-colors cursor-pointer"
             >
-              <Edit3 className="w-4 h-4 text-slate-600" /> Kembali ke Edit
+              <Edit3 className="w-4 h-4 text-[#1fb6a8]" /> Kembali ke Edit
             </button>
           )}
 
           <button
             onClick={handleExportDocx}
             disabled={isExportingDocx}
-            className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold text-xs px-4 py-2 rounded-lg flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+            className="bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white font-bold text-xs px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-md transition-colors cursor-pointer"
           >
             {isExportingDocx ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -177,9 +184,17 @@ export const KaizenReportView: React.FC<KaizenReportViewProps> = ({
           </button>
 
           <button
+            onClick={() => setShowPptxModal(true)}
+            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-md transition-colors cursor-pointer"
+          >
+            <Presentation className="w-4 h-4" />
+            Download PPTX
+          </button>
+
+          <button
             onClick={handleExportPdf}
             disabled={isExportingPdf}
-            className="bg-rose-600 hover:bg-rose-700 disabled:bg-rose-400 text-white font-semibold text-xs px-4 py-2 rounded-lg flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+            className="btn-gold text-xs px-4 py-2 rounded-xl flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
           >
             {isExportingPdf ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -513,22 +528,35 @@ export const KaizenReportView: React.FC<KaizenReportViewProps> = ({
               <span className="text-xs font-bold text-slate-800 block">Grafik Evaluasi Before vs After:</span>
               <div className="h-48 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={s7.chartData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                    <YAxis tick={{ fontSize: 10 }} />
-                    <Tooltip />
-                    <Legend wrapperStyle={{ fontSize: "11px" }} />
-                    <Line type="monotone" dataKey="standard" name="Standar Target" stroke="#dc2626" strokeDasharray="4 4" />
-                    <Line type="monotone" dataKey="before" name="Before" stroke="#f59e0b" />
-                    <Line type="monotone" dataKey="after" name="After" stroke="#10b981" strokeWidth={2} />
-                  </LineChart>
+                  {(s7?.chartType || "line") === "line" ? (
+                    <LineChart data={s7.chartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} />
+                      <Tooltip />
+                      <Legend wrapperStyle={{ fontSize: "11px" }} />
+                      <Line type="monotone" dataKey="standard" name="Standar Target" stroke="#dc2626" strokeDasharray="4 4" />
+                      <Line type="monotone" dataKey="before" name="Before" stroke="#f59e0b" />
+                      <Line type="monotone" dataKey="after" name="After" stroke="#10b981" strokeWidth={2} />
+                    </LineChart>
+                  ) : (
+                    <BarChart data={s7.chartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                      <YAxis tick={{ fontSize: 10 }} />
+                      <Tooltip />
+                      <Legend wrapperStyle={{ fontSize: "11px" }} />
+                      <Bar dataKey="before" name="Before" fill="#f59e0b" />
+                      <Bar dataKey="after" name="After" fill="#10b981" />
+                      <Bar dataKey="standard" name="Standar Target" fill="#dc2626" />
+                    </BarChart>
+                  )}
                 </ResponsiveContainer>
               </div>
 
               {/* Data Table for chart (always visible in PDF unlike interactive chart) */}
               <table className="w-full text-[10px] border border-slate-200 rounded mt-2">
-                <thead className="bg-slate-100 font-bold">
+                <thead className="bg-slate-100 font-bold text-slate-800">
                   <tr>
                     <th className="p-1.5 border-r border-slate-200">Periode</th>
                     <th className="p-1.5 border-r border-slate-200 text-rose-700">Standar</th>
@@ -536,7 +564,7 @@ export const KaizenReportView: React.FC<KaizenReportViewProps> = ({
                     <th className="p-1.5 text-emerald-700">After</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100 text-slate-900 font-medium">
                   {s7.chartData.map((cd, i) => (
                     <tr key={i}>
                       <td className="p-1.5 border-r border-slate-100">{cd.label}</td>
@@ -547,6 +575,17 @@ export const KaizenReportView: React.FC<KaizenReportViewProps> = ({
                   ))}
                 </tbody>
               </table>
+
+              {/* AUTOMATIC INSIGHT CONCLUSION BOX FOR REPORT & PDF EXPORT */}
+              <div className="bg-indigo-50/80 border border-indigo-200 rounded-lg p-2.5 text-xs text-indigo-950 flex items-start gap-2 shadow-xs mt-2">
+                <TrendingUp className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold block text-[10px] uppercase tracking-wider text-indigo-900 mb-0.5">
+                    Kesimpulan Otomatis Evaluasi Grafik:
+                  </span>
+                  <p className="leading-relaxed font-medium text-slate-900">{generateChartInsight(s7.chartData)}</p>
+                </div>
+              </div>
             </div>
 
             {s7?.chartImage && (
@@ -642,6 +681,13 @@ export const KaizenReportView: React.FC<KaizenReportViewProps> = ({
           )}
         </section>
       </div>
+
+      {/* PPTX Export Modal */}
+      <PptxExportModal
+        project={project}
+        isOpen={showPptxModal}
+        onClose={() => setShowPptxModal(false)}
+      />
     </div>
   );
 };

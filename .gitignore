@@ -1,16 +1,3 @@
-# dependencies
-node_modules/
-
-# next.js build output
-.next/
-out/
-
-# environment variables (JANGAN pernah commit ini!)
-.env
-.env.local
-.env*.local
-
-# misc
-.DS_Store
-*.log
-npm-debug.log*
+.vercel
+.env*
+node_modules

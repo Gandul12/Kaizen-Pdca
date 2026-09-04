@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/generate_excel_chart.py": {
+      "maxDuration": 30
+    }
+  }
+}

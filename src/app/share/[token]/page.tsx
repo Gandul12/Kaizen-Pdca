@@ -6,6 +6,7 @@ import { KaizenProject } from "@/types/kaizen";
 import { KaizenReportView } from "@/components/KaizenReportView";
 import { Eye, AlertTriangle, RefreshCw, ArrowLeft, Lock } from "lucide-react";
 import Link from "next/link";
+import { getVisitorId } from "@/lib/visitor";
 
 export default function ShareViewPage() {
   const params = useParams();
@@ -25,6 +26,21 @@ export default function ShareViewPage() {
       })
       .catch(() => setError("Gagal memuat proyek."))
       .finally(() => setIsLoading(false));
+
+    // Track visit for share page
+    const today = new Date().toISOString().split("T")[0];
+    const key = `visit_logged_share_${token}_${today}`;
+    if (!sessionStorage.getItem(key)) {
+      fetch("/api/track-visit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          page: `/share/${token}`,
+          visitorId: getVisitorId(),
+        }),
+      }).catch(() => {});
+      sessionStorage.setItem(key, "1");
+    }
   }, [token]);
 
   if (isLoading) {

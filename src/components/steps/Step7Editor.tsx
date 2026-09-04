@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { Step7Data, FollowUpChartPoint, FollowUpDecision } from "@/types/kaizen";
 import {
   LineChart,
@@ -11,7 +11,6 @@ import {
   Tooltip,
   Legend,
   ResponsiveContainer,
-  ReferenceLine,
   BarChart,
   Bar,
 } from "recharts";
@@ -20,11 +19,11 @@ import {
   Plus,
   Trash2,
   Upload,
-  CheckCircle,
   Image as ImageIcon,
-  HelpCircle,
+  CheckCircle,
 } from "lucide-react";
 import { Toast } from "@/components/Toast";
+import { generateChartInsight } from "@/lib/chartInsight";
 
 interface Step7EditorProps {
   data: Step7Data;
@@ -32,9 +31,13 @@ interface Step7EditorProps {
 }
 
 export const Step7Editor: React.FC<Step7EditorProps> = ({ data, onChange }) => {
-  const [chartType, setChartType] = useState<"line" | "bar">("line");
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Temporary raw string values while user is typing in standard/before/after input fields
+  const [tempInputs, setTempInputs] = useState<Record<string, string>>({});
+
+  const activeChartType = data.chartType || "line";
 
   const handleTextChange = (field: keyof Step7Data, value: any) => {
     onChange({
@@ -43,9 +46,17 @@ export const Step7Editor: React.FC<Step7EditorProps> = ({ data, onChange }) => {
     });
   };
 
+  const toggleChartType = () => {
+    const nextType = activeChartType === "line" ? "bar" : "line";
+    onChange({
+      ...data,
+      chartType: nextType,
+    });
+  };
+
   const addChartPoint = () => {
     const newPoint: FollowUpChartPoint = {
-      label: `Minggu ${ (data.chartData?.length || 0) + 1}`,
+      label: `Minggu ${(data.chartData?.length || 0) + 1}`,
       standard: 0,
       before: 0,
       after: 0,
@@ -65,21 +76,71 @@ export const Step7Editor: React.FC<Step7EditorProps> = ({ data, onChange }) => {
     });
   };
 
-  const updateChartPoint = (
+  const updateChartPointLabel = (index: number, labelVal: string) => {
+    const updated = [...(data.chartData || [])];
+    updated[index] = { ...updated[index], label: labelVal };
+    onChange({ ...data, chartData: updated });
+  };
+
+  const handlePointNumberChange = (
     index: number,
-    field: keyof FollowUpChartPoint,
-    value: any
+    field: "standard" | "before" | "after",
+    strVal: string
   ) => {
+    const key = `${index}_${field}`;
+    setTempInputs((prev) => ({ ...prev, [key]: strVal }));
+
+    const num = strVal.trim() === "" ? 0 : parseFloat(strVal);
     const updated = [...(data.chartData || [])];
     updated[index] = {
       ...updated[index],
-      [field]: field === "label" ? value : Number(value) || 0,
+      [field]: isNaN(num) ? 0 : num,
     };
-    onChange({
-      ...data,
-      chartData: updated,
+    onChange({ ...data, chartData: updated });
+  };
+
+  const handlePointNumberFocus = (
+    index: number,
+    field: "standard" | "before" | "after",
+    actualVal: number
+  ) => {
+    const key = `${index}_${field}`;
+    if (!(key in tempInputs)) {
+      setTempInputs((prev) => ({
+        ...prev,
+        [key]: actualVal === 0 ? "" : String(actualVal),
+      }));
+    }
+  };
+
+  const handlePointNumberBlur = (
+    index: number,
+    field: "standard" | "before" | "after"
+  ) => {
+    const key = `${index}_${field}`;
+    setTempInputs((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
     });
   };
+
+  const getDisplayNumberValue = (
+    index: number,
+    field: "standard" | "before" | "after",
+    actualVal: number
+  ) => {
+    const key = `${index}_${field}`;
+    if (key in tempInputs) {
+      return tempInputs[key];
+    }
+    return actualVal === 0 ? "" : String(actualVal);
+  };
+
+  const chartInsight = useMemo(
+    () => generateChartInsight(data.chartData || []),
+    [data.chartData]
+  );
 
   const handleChartImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -172,7 +233,7 @@ export const Step7Editor: React.FC<Step7EditorProps> = ({ data, onChange }) => {
             value={data.checkMethod || ""}
             onChange={(e) => handleTextChange("checkMethod", e.target.value)}
             placeholder="e.g. Sampling 50 pcs per shift dengan micrometer burr"
-            className="w-full border border-slate-300 rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-indigo-500"
+            className="w-full border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500"
           />
         </div>
 
@@ -185,7 +246,7 @@ export const Step7Editor: React.FC<Step7EditorProps> = ({ data, onChange }) => {
             value={data.checkFrequency || ""}
             onChange={(e) => handleTextChange("checkFrequency", e.target.value)}
             placeholder="e.g. Setiap hari jam 09.00 & 15.00 selama 4 minggu"
-            className="w-full border border-slate-300 rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-indigo-500"
+            className="w-full border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500"
           />
         </div>
 
@@ -198,7 +259,7 @@ export const Step7Editor: React.FC<Step7EditorProps> = ({ data, onChange }) => {
             value={data.checkPic || ""}
             onChange={(e) => handleTextChange("checkPic", e.target.value)}
             placeholder="e.g. QC Inspector (Siti) & Leader Stamping"
-            className="w-full border border-slate-300 rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-indigo-500"
+            className="w-full border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500"
           />
         </div>
       </div>
@@ -213,7 +274,7 @@ export const Step7Editor: React.FC<Step7EditorProps> = ({ data, onChange }) => {
           value={data.testResultSummary || ""}
           onChange={(e) => handleTextChange("testResultSummary", e.target.value)}
           placeholder="e.g. Setelah implementasi preventive maintenance & grinding gauge, angka defect burr turun dari 15% menjadi 0% konsisten selama 4 minggu berturut-turut."
-          className="w-full border border-slate-300 rounded-lg p-3 text-xs focus:ring-2 focus:ring-indigo-500"
+          className="w-full border border-slate-300 rounded-lg p-3 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500"
         />
       </div>
 
@@ -233,10 +294,10 @@ export const Step7Editor: React.FC<Step7EditorProps> = ({ data, onChange }) => {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setChartType(chartType === "line" ? "bar" : "line")}
+              onClick={toggleChartType}
               className="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors cursor-pointer shadow-sm"
             >
-              Mode: {chartType === "line" ? "Line Chart" : "Bar Chart"}
+              Mode: {activeChartType === "line" ? "Line Chart" : "Bar Chart"}
             </button>
 
             <label className="cursor-pointer bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg border border-slate-300 flex items-center gap-1.5 transition-colors shadow-sm">
@@ -255,10 +316,10 @@ export const Step7Editor: React.FC<Step7EditorProps> = ({ data, onChange }) => {
 
         {/* Chart Rendering Preview */}
         {data.chartData && data.chartData.length > 0 && (
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
             <div className="h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">
-                {chartType === "line" ? (
+                {activeChartType === "line" ? (
                   <LineChart data={data.chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                     <XAxis dataKey="label" tick={{ fontSize: 11 }} />
@@ -282,6 +343,17 @@ export const Step7Editor: React.FC<Step7EditorProps> = ({ data, onChange }) => {
                   </BarChart>
                 )}
               </ResponsiveContainer>
+            </div>
+
+            {/* AUTOMATIC INSIGHT CONCLUSION BOX */}
+            <div className="bg-indigo-50/80 border border-indigo-200 rounded-xl p-3 text-xs text-indigo-950 flex items-start gap-2 shadow-xs">
+              <TrendingUp className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold block text-[11px] uppercase tracking-wider text-indigo-900 mb-0.5">
+                  Kesimpulan Otomatis Evaluasi Grafik:
+                </span>
+                <p className="leading-relaxed font-medium">{chartInsight}</p>
+              </div>
             </div>
           </div>
         )}
@@ -310,7 +382,7 @@ export const Step7Editor: React.FC<Step7EditorProps> = ({ data, onChange }) => {
           </div>
         )}
 
-        {/* Data points table editor */}
+        {/* Data points table editor with fixed touch/replacement & inputMode */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-700">
@@ -330,46 +402,58 @@ export const Step7Editor: React.FC<Step7EditorProps> = ({ data, onChange }) => {
               data.chartData.map((pt, idx) => (
                 <div
                   key={idx}
-                  className="flex items-center gap-2 bg-white p-2 rounded-lg border border-slate-200 shadow-xs"
+                  className="flex flex-wrap sm:flex-nowrap items-center gap-2 bg-white p-2 rounded-lg border border-slate-200 shadow-xs"
                 >
                   <input
                     type="text"
                     value={pt.label || ""}
-                    onChange={(e) => updateChartPoint(idx, "label", e.target.value)}
+                    onChange={(e) => updateChartPointLabel(idx, e.target.value)}
                     placeholder="Nama Periode (e.g. W1)"
-                    className="w-1/4 border border-slate-300 rounded p-1 text-xs"
+                    className="w-full sm:w-1/4 border border-slate-300 rounded p-1.5 text-xs text-slate-900 bg-white"
                   />
-                  <div className="flex items-center gap-1 w-1/4">
-                    <span className="text-[10px] text-rose-600 font-bold">Standar:</span>
+                  <div className="flex items-center gap-1 w-[30%] sm:w-1/4">
+                    <span className="text-[10px] text-rose-600 font-bold shrink-0">Standar:</span>
                     <input
-                      type="number"
-                      value={pt.standard}
-                      onChange={(e) => updateChartPoint(idx, "standard", e.target.value)}
-                      className="w-full border border-slate-300 rounded p-1 text-xs"
+                      type="text"
+                      inputMode="decimal"
+                      value={getDisplayNumberValue(idx, "standard", pt.standard)}
+                      onFocus={() => handlePointNumberFocus(idx, "standard", pt.standard)}
+                      onChange={(e) => handlePointNumberChange(idx, "standard", e.target.value)}
+                      onBlur={() => handlePointNumberBlur(idx, "standard")}
+                      placeholder="0"
+                      className="w-full border border-slate-300 rounded p-1.5 text-xs text-slate-900 bg-white font-medium min-w-[55px]"
                     />
                   </div>
-                  <div className="flex items-center gap-1 w-1/4">
-                    <span className="text-[10px] text-amber-600 font-bold">Before:</span>
+                  <div className="flex items-center gap-1 w-[30%] sm:w-1/4">
+                    <span className="text-[10px] text-amber-600 font-bold shrink-0">Before:</span>
                     <input
-                      type="number"
-                      value={pt.before}
-                      onChange={(e) => updateChartPoint(idx, "before", e.target.value)}
-                      className="w-full border border-slate-300 rounded p-1 text-xs"
+                      type="text"
+                      inputMode="decimal"
+                      value={getDisplayNumberValue(idx, "before", pt.before)}
+                      onFocus={() => handlePointNumberFocus(idx, "before", pt.before)}
+                      onChange={(e) => handlePointNumberChange(idx, "before", e.target.value)}
+                      onBlur={() => handlePointNumberBlur(idx, "before")}
+                      placeholder="0"
+                      className="w-full border border-slate-300 rounded p-1.5 text-xs text-slate-900 bg-white font-medium min-w-[55px]"
                     />
                   </div>
-                  <div className="flex items-center gap-1 w-1/4">
-                    <span className="text-[10px] text-emerald-600 font-bold">After:</span>
+                  <div className="flex items-center gap-1 w-[30%] sm:w-1/4">
+                    <span className="text-[10px] text-emerald-600 font-bold shrink-0">After:</span>
                     <input
-                      type="number"
-                      value={pt.after}
-                      onChange={(e) => updateChartPoint(idx, "after", e.target.value)}
-                      className="w-full border border-slate-300 rounded p-1 text-xs"
+                      type="text"
+                      inputMode="decimal"
+                      value={getDisplayNumberValue(idx, "after", pt.after)}
+                      onFocus={() => handlePointNumberFocus(idx, "after", pt.after)}
+                      onChange={(e) => handlePointNumberChange(idx, "after", e.target.value)}
+                      onBlur={() => handlePointNumberBlur(idx, "after")}
+                      placeholder="0"
+                      className="w-full border border-slate-300 rounded p-1.5 text-xs text-slate-900 bg-white font-medium min-w-[55px]"
                     />
                   </div>
                   <button
                     type="button"
                     onClick={() => removeChartPoint(idx)}
-                    className="text-slate-400 hover:text-rose-600 p-1 rounded"
+                    className="text-slate-400 hover:text-rose-600 p-1 rounded ml-auto"
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -434,7 +518,7 @@ export const Step7Editor: React.FC<Step7EditorProps> = ({ data, onChange }) => {
             value={data.followUpNote || ""}
             onChange={(e) => handleTextChange("followUpNote", e.target.value)}
             placeholder="e.g. Proliferasi disetujui untuk diterapkan ke Line Stamping 1 & Line Stamping 3 pada bulan depan."
-            className="w-full border border-slate-300 rounded-lg p-2.5 text-xs focus:ring-2 focus:ring-indigo-500"
+            className="w-full border border-slate-300 rounded-lg p-2.5 text-xs text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500"
           />
         </div>
       </div>

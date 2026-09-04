@@ -1,66 +1,91 @@
 "use client";
 
 import React, { useState, useCallback } from "react";
-import { GenbaEntry } from "@/types/genba";
-import { generateGenbaDocx, generateGenbaWeeklyDocx, computeDayCompletionPercent } from "@/lib/genbaDocxExport";
+import type { GenbaEntry, GenbaItem } from "@/types/genba";
+import { generateGenbaDocx, generateGenbaWeeklyDocx } from "@/lib/genbaDocxExport";
 import { exportElementToPdf, estimateGenbaImagesSize } from "@/lib/pdfExport";
 import { groupGenbaItemsBySection } from "@/lib/genbaItemGrouping";
 import { Toast } from "@/components/Toast";
-import { FileSpreadsheet, Download, Loader2, AlertTriangle } from "lucide-react";
+import { Eye, FileSpreadsheet, Download, Loader2, AlertTriangle, CheckSquare, XSquare, Square } from "lucide-react";
 
-// Mode harian (perilaku lama, FR-5/FR-6): berikan `entry`.
-// Mode mingguan (FR-7): berikan `entries` (+ opsional rangeStart/rangeEnd
-// untuk penamaan file kalau rentang tanggal yang dipilih user tidak persis
-// sama dengan tanggal entry pertama/terakhir yang punya data).
 interface GenbaReportViewProps {
   entry?: GenbaEntry;
   entries?: GenbaEntry[];
-  rangeStart?: string;
-  rangeEnd?: string;
 }
 
-const DAY_NAMES_ID = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
-const MONTH_NAMES_ID_SHORT = [
-  "Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des",
-];
-
-function formatDateIndonesian(dateStr: string): string {
+function fmtDateHuman(dateStr: string): string {
   const [y, m, d] = dateStr.split("-").map(Number);
-  const dateObj = new Date(y, m - 1, d);
-  return `${DAY_NAMES_ID[dateObj.getDay()]}, ${d} ${MONTH_NAMES_ID_SHORT[m - 1]} ${y}`;
+  const date = new Date(y, m - 1, d);
+  const days = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+  const months = [
+    "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+    "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+  ];
+  return `${days[date.getDay()]}, ${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
 }
 
-function statusIcon(status: string): string {
-  if (status === "ok") return "✅";
-  if (status === "ng") return "❌";
-  return "⬜";
+function formatEndTime(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
-// Isi satu hari (header Leader/Line/Target + section jadwal + foto statis).
-// Dipakai ulang baik untuk mode harian (satu instance) maupun tiap hari di
-// mode mingguan (banyak instance, satu per direct-child <div>).
-const GenbaDayContent: React.FC<{ entry: GenbaEntry; showBigTitle: boolean }> = ({ entry, showBigTitle }) => {
+// Ikon status STATIS (tanpa tombol interaktif) — dipakai di elemen printable.
+function StaticStatusIcon({ status }: { status: GenbaItem["status"] }) {
+  if (status === "ok") return <CheckSquare className="w-4 h-4 text-emerald-600" />;
+  if (status === "ng") return <XSquare className="w-4 h-4 text-rose-600" />;
+  return <Square className="w-4 h-4 text-slate-300" />;
+}
+
+// Warna status Tindak Lanjut (corrective action) — konsisten dengan UI GenbaItemRow & DOCX.
+const CORRECTIVE_STATUS_META: Record<string, { label: string; textClass: string }> = {
+  belum: { label: "Belum", textClass: "text-slate-500" },
+  proses: { label: "Proses", textClass: "text-amber-600" },
+  selesai: { label: "Selesai", textClass: "text-emerald-600" },
+};
+
+// Estimasi ukuran foto — daftar entries (mingguan) atau satu entry (harian).
+function estimateImages(entry?: GenbaEntry, entries?: GenbaEntry[]) {
+  if (entries && entries.length > 0) {
+    let totalBytes = 0;
+    let imageCount = 0;
+    entries.forEach((e) => {
+      const r = estimateGenbaImagesSize(e);
+      totalBytes += r.totalBytes;
+      imageCount += r.imageCount;
+    });
+    const totalMB = Math.round((totalBytes / (1024 * 1024)) * 10) / 10;
+    return { totalBytes, totalMB, exceedsLimit: totalMB > 15 || imageCount >= 10, imageCount };
+  }
+  if (entry) return estimateGenbaImagesSize(entry);
+  return { totalBytes: 0, totalMB: 0, exceedsLimit: false, imageCount: 0 };
+}
+
+// Blok statis satu hari (judul, info, tabel jadwal, foto) — dipakai untuk
+// mode harian (langsung di dalam #genba-printable-report) maupun diulang
+// per hari di dalam mode mingguan (#genba-weekly-printable-report).
+function DayPrintableBlock({ entry }: { entry: GenbaEntry }) {
+  const doneCount = entry.items.filter((it) => it.status !== "pending").length;
+  const sections = groupGenbaItemsBySection(entry.items);
+  const itemsWithPhotos = entry.items.filter((it) => it.attachments && it.attachments.length > 0);
+
   return (
     <>
-      <section className="border-b-4 border-slate-800 pb-4 text-center">
-        {showBigTitle && (
-          <div className="inline-block px-3 py-1 bg-indigo-900 text-white text-xs font-bold uppercase tracking-wider rounded mb-2">
-            CHECKLIST GENBA HARIAN
-          </div>
-        )}
-        <h1 className="text-xl font-black text-slate-900 uppercase tracking-tight">
-          {formatDateIndonesian(entry.date)}
-        </h1>
+      <section className="border-b-4 border-slate-800 pb-5 text-center">
+        <div className="inline-block px-3 py-1 bg-indigo-900 text-white text-xs font-bold uppercase tracking-wider rounded mb-2">
+          CHECKLIST GENBA HARIAN
+        </div>
+        <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight">{fmtDateHuman(entry.date)}</h1>
       </section>
 
-      <section className="mt-4 border border-slate-300 rounded-lg overflow-hidden text-xs bg-slate-50">
+      <section className="mt-6 border border-slate-300 rounded-lg overflow-hidden text-xs bg-slate-50">
         <div className="grid grid-cols-1 md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-slate-300">
           <div className="p-3 space-y-1">
-            <span className="font-bold text-slate-500 block uppercase text-[10px]">Leader</span>
+            <span className="font-bold text-slate-500 block uppercase text-[10px]">Line Leader</span>
             <p className="font-bold text-slate-900 text-sm">{entry.leaderName || "-"}</p>
           </div>
           <div className="p-3 space-y-1">
-            <span className="font-bold text-slate-500 block uppercase text-[10px]">Line / Area</span>
+            <span className="font-bold text-slate-500 block uppercase text-[10px]">Nama Line</span>
             <p className="font-semibold text-slate-800">{entry.lineName || "-"}</p>
           </div>
           <div className="p-3 space-y-1">
@@ -68,115 +93,132 @@ const GenbaDayContent: React.FC<{ entry: GenbaEntry; showBigTitle: boolean }> = 
             <p className="font-semibold text-slate-800">{entry.dailyTarget || "-"}</p>
           </div>
         </div>
+        <div className="border-t border-slate-300 px-3 py-2 bg-slate-100 font-medium text-slate-600">
+          {doneCount}/{entry.items.length} poin checklist sudah dicek
+        </div>
       </section>
 
-      {groupGenbaItemsBySection(entry.items).map((section) => (
-        <section key={section.sectionId} className="mt-6">
+      <section className="mt-8">
+        <div className="bg-slate-800 text-white px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider">
+          Jadwal &amp; Temuan
+        </div>
+        <table className="w-full text-xs mt-3 border-collapse">
+          <thead>
+            <tr className="bg-slate-100 text-slate-600 uppercase text-[10px]">
+              <th className="border border-slate-200 p-2 text-left w-16">Jam</th>
+              <th className="border border-slate-200 p-2 text-left w-14">Status</th>
+              <th className="border border-slate-200 p-2 text-left">Point / Standar / Aktual</th>
+              <th className="border border-slate-200 p-2 text-left">Catatan</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sections.map((section) => (
+              <React.Fragment key={section.sectionId}>
+                <tr>
+                  <td colSpan={4} className="border border-slate-200 bg-slate-300 font-bold text-slate-800 p-1.5 text-[10px] uppercase">
+                    {section.sectionTitle}
+                  </td>
+                </tr>
+                {section.items.map((item) => (
+                  <React.Fragment key={item.id}>
+                    <tr className="align-top">
+                      <td className="border border-slate-200 p-2 font-mono">{formatEndTime(item.endMinutes)}</td>
+                      <td className="border border-slate-200 p-2">
+                        <StaticStatusIcon status={item.status} />
+                      </td>
+                      <td className="border border-slate-200 p-2">
+                        <p className="font-semibold text-slate-900">{item.point}</p>
+                        <p className="text-slate-500 text-[11px] mt-0.5">Standar: {item.standard}</p>
+                        {item.actual && <p className="text-slate-700 text-[11px] mt-0.5">Aktual: {item.actual}</p>}
+                      </td>
+                      <td className="border border-slate-200 p-2 text-slate-700">{item.note || "-"}</td>
+                    </tr>
+                    {item.correctiveAction && (
+                      <tr>
+                        <td colSpan={4} className="border border-slate-200 bg-amber-50 p-2">
+                          <p className="text-[11px] font-bold text-amber-800">
+                            Tindak Lanjut —{" "}
+                            <span className={CORRECTIVE_STATUS_META[item.correctiveAction.status]?.textClass || "text-slate-600"}>
+                              {CORRECTIVE_STATUS_META[item.correctiveAction.status]?.label || item.correctiveAction.status}
+                            </span>
+                          </p>
+                          <p className="text-[11px] text-amber-900 mt-0.5">
+                            <span className="font-semibold">Akar Masalah:</span> {item.correctiveAction.rootCause || "-"}
+                          </p>
+                          <p className="text-[11px] text-amber-900 mt-0.5">
+                            <span className="font-semibold">Tindakan:</span> {item.correctiveAction.action || "-"}
+                          </p>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                ))}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      {itemsWithPhotos.length > 0 && (
+        <section className="mt-8">
           <div className="bg-slate-800 text-white px-3 py-1.5 rounded text-xs font-bold uppercase tracking-wider">
-            {section.sectionTitle}
+            Dokumentasi Foto
           </div>
-
-          <div className="mt-3 space-y-2 text-xs">
-            {section.items.map((item) => (
-                <div key={item.id} className="border border-slate-200 rounded-lg p-3 bg-slate-50/50">
-                  <div className="flex items-start gap-2">
-                    <span className="text-base leading-none shrink-0">{statusIcon(item.status)}</span>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-bold text-slate-800">{item.point}</p>
-                      <p className="text-slate-500">Standar: {item.standard}</p>
-                      {item.actual && (
-                        <p className={item.status === "ng" ? "text-rose-700 font-semibold mt-0.5" : "text-slate-700 mt-0.5"}>
-                          Aktual: {item.actual}
-                        </p>
-                      )}
-                      {item.note && (
-                        <p className="text-slate-700 mt-1 italic">Catatan: {item.note}</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {item.attachments && item.attachments.length > 0 && (
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-2">
-                      {item.attachments.map((att) => (
-                        <div key={att.id} className="border border-slate-200 rounded overflow-hidden bg-white">
-                          <img
-                            src={att.fileUrl}
-                            alt={att.fileName || "Foto genba"}
-                            className="h-20 w-full object-cover"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {item.correctiveAction && (
-                    <div className="mt-1 bg-slate-100 rounded p-1.5">
-                      <p className="text-slate-700">Akar Masalah: {item.correctiveAction.rootCause}</p>
-                      <p className="text-slate-700">Tindakan: {item.correctiveAction.action}</p>
-                      <p
-                        className={
-                          item.correctiveAction.status === "selesai"
-                            ? "text-emerald-700 font-semibold"
-                            : item.correctiveAction.status === "proses"
-                            ? "text-amber-700 font-semibold"
-                            : "text-slate-500 font-semibold"
-                        }
-                      >
-                        Status: {item.correctiveAction.status}
-                      </p>
-                    </div>
-                  )}
+          <div className="mt-3 space-y-4">
+            {itemsWithPhotos.map((item) => (
+              <div key={item.id}>
+                <p className="text-xs font-bold text-slate-700 mb-1.5">{item.point}</p>
+                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                  {item.attachments.map((att) => (
+                    <img
+                      key={att.id}
+                      src={att.fileUrl}
+                      alt={att.fileName}
+                      className="w-full aspect-square object-cover rounded-lg border border-slate-200"
+                      crossOrigin="anonymous"
+                    />
+                  ))}
                 </div>
-              ))}
+              </div>
+            ))}
           </div>
         </section>
-      ))}
+      )}
     </>
   );
-};
+}
 
-export const GenbaReportView: React.FC<GenbaReportViewProps> = ({ entry, entries, rangeStart, rangeEnd }) => {
+export const GenbaReportView: React.FC<GenbaReportViewProps> = ({ entry, entries }) => {
   const [isExportingDocx, setIsExportingDocx] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
-  const isWeekly = Array.isArray(entries) && entries.length > 0;
-  const sortedEntries = isWeekly ? [...(entries as GenbaEntry[])].sort((a, b) => a.date.localeCompare(b.date)) : [];
-  const weeklyStart = rangeStart || sortedEntries[0]?.date || "";
-  const weeklyEnd = rangeEnd || sortedEntries[sortedEntries.length - 1]?.date || "";
+  const isWeeklyRequested = entries !== undefined;
+  const hasWeeklyData = !!entries && entries.length > 0;
+  const isWeekly = isWeeklyRequested && hasWeeklyData;
 
-  // Agregat estimasi ukuran foto — reuse estimateGenbaImagesSize per entry
-  // (tanpa mengubah pdfExport.ts), dijumlah untuk mode mingguan.
-  const imgInfo = isWeekly
-    ? sortedEntries.reduce(
-        (acc, e) => {
-          const r = estimateGenbaImagesSize(e);
-          return {
-            totalBytes: acc.totalBytes + r.totalBytes,
-            imageCount: acc.imageCount + r.imageCount,
-          };
-        },
-        { totalBytes: 0, imageCount: 0 }
-      )
-    : null;
-  const weeklyTotalMB = imgInfo ? Math.round((imgInfo.totalBytes / (1024 * 1024)) * 10) / 10 : 0;
-  const weeklyExceedsLimit = imgInfo ? weeklyTotalMB > 15 || imgInfo.imageCount >= 10 : false;
-
-  const singleImgInfo = !isWeekly && entry ? estimateGenbaImagesSize(entry) : null;
+  const imgInfo = estimateImages(entry, entries);
 
   const handleExportDocx = useCallback(async () => {
     setExportError(null);
+
+    if (isWeeklyRequested && !hasWeeklyData) {
+      setExportError("Tidak ada data genba pada rentang tanggal yang dipilih.");
+      return;
+    }
+
     setIsExportingDocx(true);
-    // Yield execution so UI updates loading state before running docx compilation
+    // Yield execution supaya UI sempat update loading state sebelum compile docx
     await new Promise((r) => setTimeout(r, 60));
 
     try {
       let blob: Blob;
       let fileName: string;
 
-      if (isWeekly) {
-        blob = await generateGenbaWeeklyDocx(sortedEntries);
-        fileName = `Genba-Mingguan-${weeklyStart}-${weeklyEnd}.docx`;
+      if (isWeekly && entries) {
+        const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date));
+        blob = await generateGenbaWeeklyDocx(entries);
+        fileName = `Genba-Mingguan-${sorted[0].date}_${sorted[sorted.length - 1].date}.docx`;
       } else if (entry) {
         blob = await generateGenbaDocx(entry);
         fileName = `Genba-${entry.date}.docx`;
@@ -193,24 +235,26 @@ export const GenbaReportView: React.FC<GenbaReportViewProps> = ({ entry, entries
       document.body.removeChild(link);
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) {
-      console.error("Export Genba Word (.docx) error:", error);
+      console.error("Export Word (.docx) genba error:", error);
       setExportError("Gagal export Word (.docx). Silakan coba lagi.");
     } finally {
       setIsExportingDocx(false);
     }
-  }, [isWeekly, sortedEntries, weeklyStart, weeklyEnd, entry]);
+  }, [entry, entries, isWeekly, isWeeklyRequested, hasWeeklyData]);
 
   const handleExportPdf = useCallback(async () => {
     setExportError(null);
 
-    // Pre-check for heavy images
-    const exceedsLimit = isWeekly ? weeklyExceedsLimit : singleImgInfo?.exceedsLimit || false;
-    const imageCount = isWeekly ? imgInfo?.imageCount || 0 : singleImgInfo?.imageCount || 0;
-    const totalMB = isWeekly ? weeklyTotalMB : singleImgInfo?.totalMB || 0;
+    if (isWeeklyRequested && !hasWeeklyData) {
+      setExportError("Tidak ada data genba pada rentang tanggal yang dipilih.");
+      return;
+    }
 
-    if (exceedsLimit) {
+    // Pre-check foto berat
+    const imgData = estimateImages(entry, entries);
+    if (imgData.exceedsLimit) {
       const confirmProceed = confirm(
-        `Peringatan: Laporan ini memiliki ${imageCount} foto (estimasi ~${totalMB} MB).\n` +
+        `Peringatan: Laporan ini memiliki ${imgData.imageCount} foto (estimasi ~${imgData.totalMB} MB).\n` +
         `Proses export PDF mungkin membutuhkan waktu atau memori besar pada perangkat dengan memori terbatas.\n\n` +
         `Apakah Anda ingin melanjutkan export PDF?`
       );
@@ -218,119 +262,189 @@ export const GenbaReportView: React.FC<GenbaReportViewProps> = ({ entry, entries
     }
 
     setIsExportingPdf(true);
-    // Yield execution so UI updates loading state before running PDF capture
+    // Yield execution supaya UI sempat update loading state sebelum capture PDF
     await new Promise((r) => setTimeout(r, 120));
 
     try {
-      if (isWeekly) {
-        await exportElementToPdf("genba-weekly-printable-report", `Genba-Mingguan-${weeklyStart}-${weeklyEnd}.pdf`);
+      if (isWeekly && entries) {
+        const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date));
+        await exportElementToPdf(
+          "genba-weekly-printable-report",
+          `Genba-Mingguan-${sorted[0].date}_${sorted[sorted.length - 1].date}.pdf`
+        );
       } else if (entry) {
         await exportElementToPdf("genba-printable-report", `Genba-${entry.date}.pdf`);
       }
     } catch (error) {
-      console.error("Export Genba PDF error:", error);
+      console.error("Export PDF genba error:", error);
       setExportError("Gagal export PDF. Silakan coba lagi.");
     } finally {
       setIsExportingPdf(false);
     }
-  }, [isWeekly, weeklyExceedsLimit, weeklyTotalMB, imgInfo, singleImgInfo, weeklyStart, weeklyEnd, entry]);
+  }, [entry, entries, isWeekly, isWeeklyRequested, hasWeeklyData]);
 
-  if (!isWeekly && !entry) return null;
+  // Rentang mingguan dipilih tapi tidak ada data — pesan jelas, bukan export kosong.
+  if (isWeeklyRequested && !hasWeeklyData) {
+    return (
+      <div className="bg-amber-50 border border-amber-300 rounded-2xl p-6 text-center text-sm text-amber-900">
+        Tidak ada data genba pada rentang tanggal yang dipilih. Coba pilih rentang tanggal lain.
+      </div>
+    );
+  }
 
-  const totalDays = sortedEntries.length;
-  const avgPercent =
-    totalDays > 0
-      ? Math.round(sortedEntries.reduce((sum, e) => sum + computeDayCompletionPercent(e), 0) / totalDays)
-      : 0;
+  if (!isWeekly && !entry) {
+    return null;
+  }
+
+  const sortedEntries = entries ? [...entries].sort((a, b) => a.date.localeCompare(b.date)) : [];
 
   return (
     <div className="space-y-4">
-      {exportError && (
-        <Toast message={exportError} type="error" onClose={() => setExportError(null)} />
-      )}
+      {exportError && <Toast message={exportError} type="error" onClose={() => setExportError(null)} />}
 
-      {((isWeekly && weeklyExceedsLimit) || (!isWeekly && singleImgInfo?.exceedsLimit)) && (
+      {imgInfo.exceedsLimit && (
         <div className="bg-amber-50 border border-amber-300 rounded-xl p-3.5 flex items-center gap-2.5 text-xs text-amber-900 print:hidden shadow-xs">
           <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
           <span>
-            <strong>Peringatan Ukuran Media:</strong> Laporan ini memiliki{" "}
-            {isWeekly ? imgInfo?.imageCount : singleImgInfo?.imageCount} foto (estimasi ~
-            {isWeekly ? weeklyTotalMB : singleImgInfo?.totalMB} MB). Proses export PDF pada perangkat
-            seluler mungkin memerlukan waktu lebih lama.
+            <strong>Peringatan Ukuran Media:</strong> Laporan ini memiliki {imgInfo.imageCount} foto (estimasi ~{imgInfo.totalMB} MB).
+            Proses export PDF pada perangkat seluler mungkin memerlukan waktu lebih lama.
           </span>
         </div>
       )}
 
-      {/* ═══ Action bar (NOT captured in PDF) ═══ */}
-      <div className="bg-white p-4 rounded-xl shadow-md border border-slate-200 flex flex-wrap items-center justify-end gap-2 print:hidden">
-        <button
-          onClick={handleExportDocx}
-          disabled={isExportingDocx}
-          className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-semibold text-xs px-4 py-2 rounded-lg flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-        >
-          {isExportingDocx ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <FileSpreadsheet className="w-4 h-4" />
-          )}
-          {isExportingDocx ? "Memproses..." : "Unduh DOCX"}
-        </button>
+      {/* Action bar — tidak ikut ter-capture PDF */}
+      <div className="bg-[#101f36] p-4 rounded-2xl shadow-xl border border-[#8fa3bd]/16 flex flex-wrap items-center justify-between gap-3 print:hidden">
+        <div className="flex items-center gap-2">
+          <Eye className="w-5 h-5 text-[#1fb6a8]" />
+          <h2 className="font-display font-extrabold text-white text-lg tracking-wide">
+            {isWeekly ? "Pratinjau Laporan Genba Mingguan" : "Pratinjau Laporan Genba Harian"}
+          </h2>
+        </div>
 
-        <button
-          onClick={handleExportPdf}
-          disabled={isExportingPdf}
-          className="bg-rose-600 hover:bg-rose-700 disabled:bg-rose-400 text-white font-semibold text-xs px-4 py-2 rounded-lg flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
-        >
-          {isExportingPdf ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Download className="w-4 h-4" />
-          )}
-          {isExportingPdf ? "Memproses..." : "Unduh PDF"}
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={handleExportDocx}
+            disabled={isExportingDocx}
+            className="bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white font-bold text-xs px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-md transition-colors cursor-pointer"
+          >
+            {isExportingDocx ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+            {isExportingDocx ? "Memproses..." : "Export Word (.docx)"}
+          </button>
+
+          <button
+            onClick={handleExportPdf}
+            disabled={isExportingPdf}
+            className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-900 font-bold text-xs px-4 py-2 rounded-xl flex items-center gap-1.5 shadow-md transition-colors cursor-pointer"
+          >
+            {isExportingPdf ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+            {isExportingPdf ? "Memproses..." : "Unduh PDF"}
+          </button>
+        </div>
       </div>
 
       {isWeekly ? (
-        // ═══ Printable Weekly Report — tiap <div> direct child = satu hari,
-        // supaya exportElementToPdf otomatis memisah tiap hari (dan
-        // menyisipkan halaman baru kalau perlu) tanpa perlu diubah. ═══
+        /* ═══ Elemen Printable Mingguan — ringkasan + satu <div> per hari sebagai direct child ═══ */
         <div
           id="genba-weekly-printable-report"
-          className="bg-white border-2 border-slate-300 rounded-xl p-8 shadow-lg max-w-4xl mx-auto text-slate-800 print:shadow-none print:border-none space-y-6"
+          className="bg-white border-2 border-slate-300 rounded-xl p-8 shadow-lg max-w-4xl mx-auto text-slate-800 print:shadow-none print:border-none"
         >
-          <div className="border-b-4 border-slate-800 pb-4 text-center">
-            <div className="inline-block px-3 py-1 bg-indigo-900 text-white text-xs font-bold uppercase tracking-wider rounded mb-2">
-              LAPORAN MINGGUAN CHECKLIST GENBA
-            </div>
-            <h1 className="text-xl font-black text-slate-900 uppercase tracking-tight">
-              {weeklyStart && weeklyEnd
-                ? `${formatDateIndonesian(weeklyStart)} — ${formatDateIndonesian(weeklyEnd)}`
-                : "-"}
-            </h1>
-            <div className="mt-3 flex flex-wrap justify-center gap-4 text-xs text-slate-600">
-              <span>
-                Total Hari Tercatat: <strong className="text-slate-900">{totalDays}</strong>
-              </span>
-              <span>
-                Rata-rata Checklist Selesai: <strong className="text-slate-900">{avgPercent}%</strong>
-              </span>
-            </div>
+          <div>
+            <section className="border-b-4 border-slate-800 pb-5 text-center">
+              <div className="inline-block px-3 py-1 bg-indigo-900 text-white text-xs font-bold uppercase tracking-wider rounded mb-2">
+                LAPORAN MINGGUAN GENBA HARIAN
+              </div>
+              <h1 className="text-2xl font-black text-slate-900 uppercase tracking-tight">
+                {fmtDateHuman(sortedEntries[0].date)} — {fmtDateHuman(sortedEntries[sortedEntries.length - 1].date)}
+              </h1>
+            </section>
+
+            <section className="mt-6">
+              {(() => {
+                const dayStats = sortedEntries.map((e) => {
+                  const total = e.items.length;
+                  const done = e.items.filter((it) => it.status !== "pending").length;
+                  const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+                  return { date: e.date, total, done, percent };
+                });
+                const avgPercent =
+                  dayStats.length > 0
+                    ? Math.round(dayStats.reduce((sum, d) => sum + d.percent, 0) / dayStats.length)
+                    : 0;
+
+                const correctiveCounts = { belum: 0, proses: 0, selesai: 0 };
+                let correctiveTotal = 0;
+                sortedEntries.forEach((e) => {
+                  e.items.forEach((it) => {
+                    if (it.correctiveAction) {
+                      correctiveTotal++;
+                      const st = it.correctiveAction.status as keyof typeof correctiveCounts;
+                      if (correctiveCounts[st] !== undefined) correctiveCounts[st]++;
+                    }
+                  });
+                });
+
+                return (
+                  <>
+                    <div className="grid grid-cols-2 gap-3 text-xs mb-3">
+                      <div className="border border-slate-200 p-3 rounded-lg bg-slate-50">
+                        <span className="font-bold text-slate-500 block uppercase text-[10px]">Total Hari Tercatat</span>
+                        <p className="font-black text-slate-900 text-lg">{sortedEntries.length} hari</p>
+                      </div>
+                      <div className="border border-slate-200 p-3 rounded-lg bg-slate-50">
+                        <span className="font-bold text-slate-500 block uppercase text-[10px]">Rata-rata Selesai</span>
+                        <p className="font-black text-slate-900 text-lg">{avgPercent}%</p>
+                      </div>
+                    </div>
+                    {correctiveTotal > 0 && (
+                      <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 text-xs mb-3">
+                        <span className="font-bold text-amber-700 block uppercase text-[10px] mb-1">
+                          Item dengan Tindak Lanjut ({correctiveTotal})
+                        </span>
+                        <div className="flex gap-4 text-amber-900">
+                          <span><span className="font-bold">{correctiveCounts.belum}</span> Belum</span>
+                          <span><span className="font-bold">{correctiveCounts.proses}</span> Proses</span>
+                          <span><span className="font-bold">{correctiveCounts.selesai}</span> Selesai</span>
+                        </div>
+                      </div>
+                    )}
+                    <table className="w-full text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-slate-100 text-slate-600 uppercase text-[10px]">
+                          <th className="border border-slate-200 p-2 text-left">Tanggal</th>
+                          <th className="border border-slate-200 p-2 text-left">Selesai</th>
+                          <th className="border border-slate-200 p-2 text-left">Persentase</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dayStats.map((d) => (
+                          <tr key={d.date}>
+                            <td className="border border-slate-200 p-2">{fmtDateHuman(d.date)}</td>
+                            <td className="border border-slate-200 p-2">{d.done}/{d.total}</td>
+                            <td className="border border-slate-200 p-2">{d.percent}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                );
+              })()}
+            </section>
           </div>
 
-          {sortedEntries.map((dayEntry) => (
-            <div key={dayEntry.id || dayEntry.date} className="pt-2">
-              <GenbaDayContent entry={dayEntry} showBigTitle={false} />
+          {sortedEntries.map((e) => (
+            <div key={e.id || e.date} className="mt-10 pt-10 border-t-2 border-dashed border-slate-300">
+              <DayPrintableBlock entry={e} />
             </div>
           ))}
         </div>
       ) : (
         entry && (
-          // ═══ Printable Daily Report (perilaku lama, tidak berubah) ═══
+          /* ═══ Elemen Printable Harian ═══ */
           <div
             id="genba-printable-report"
             className="bg-white border-2 border-slate-300 rounded-xl p-8 shadow-lg max-w-4xl mx-auto text-slate-800 print:shadow-none print:border-none"
           >
-            <GenbaDayContent entry={entry} showBigTitle={true} />
+            <DayPrintableBlock entry={entry} />
           </div>
         )
       )}

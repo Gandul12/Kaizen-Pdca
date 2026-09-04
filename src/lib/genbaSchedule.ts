@@ -1,92 +1,145 @@
-import { GenbaItem, GenbaItemStatus, GenbaScheduleSection } from "@/types/genba";
-import { db } from "@/db";
+import { db, ensureSchema } from "@/db";
 import { genbaScheduleItems } from "@/db/schema";
-import { eq, asc } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
+import type { GenbaItem } from "@/types/genba";
 
-// Jadwal checklist genba harian, dikelompokkan per section. `endMinutes`
-// dipakai untuk logika andon (menit sejak tengah malam batas waktu item
-// tsb seharusnya sudah dicek). Urutan & isi bisa disesuaikan kemudian
-// tanpa mengubah bentuk data — id item dibuat stabil supaya PATCH
-// per-item (toggle satu checklist) tetap aman.
-// FR-11: master data checklist genba SEKARANG hidup di tabel
-// genba_schedule_items (lihat src/db/schema.ts) — bisa diatur lewat
-// /api/genba/schedule/*. Array statis di bawah ini DIPERTAHANKAN apa
-// adanya untuk sementara karena masih dipakai langsung (synchronous) oleh:
-//   - src/app/genba/page.tsx
-//   - src/components/genba/GenbaReportView.tsx
-//   - src/lib/genbaDocxExport.ts
-// Ketiganya BELUM dimigrasi ke sumber DB pada task ini (di luar scope
-// 3 poin yang diminta) — kalau schedule diedit lewat API baru, ketiga
-// file itu TIDAK akan ikut berubah sampai dimigrasi di task selanjutnya.
-// `buildEmptyItems()` di bawah SUDAH pindah ke DB dan tidak lagi
-// membaca array ini.
-export const GENBA_SCHEDULE: GenbaScheduleSection[] = [
+// ─────────────────────────────────────────────────────────────────────────
+// CATATAN FR-11: GENBA_SCHEDULE di bawah ini TIDAK LAGI dipakai saat runtime
+// (bukan sumber data buildEmptyItems() lagi — itu sekarang query DB tabel
+// genba_schedule_items, yang bisa diatur lewat UI di /genba/pengaturan).
+//
+// Konstanta ini sengaja dipertahankan HANYA sebagai dokumentasi/referensi 8
+// poin seed asli (FR-1) — nilai yang sama persis di-seed langsung sebagai
+// SQL literal di ensureSchema() (src/db/index.ts), BUKAN dengan meng-import
+// konstanta ini, supaya tidak terjadi circular import (genbaSchedule.ts ↔
+// db/index.ts, karena file ini sekarang perlu import { db, ensureSchema }
+// dari situ untuk versi async buildEmptyItems() di bawah).
+// ─────────────────────────────────────────────────────────────────────────
+export interface GenbaScheduleItemDef {
+  id: string;
+  point: string;
+  standard: string;
+  endMinutes: number; // menit sejak 00:00, dipakai untuk indikator andon
+}
+
+export interface GenbaScheduleSectionDef {
+  sectionId: string;
+  sectionTitle: string;
+  items: GenbaScheduleItemDef[];
+}
+
+/** @deprecated Referensi historis saja — tidak diimpor oleh kode lain. */
+export const GENBA_SCHEDULE: GenbaScheduleSectionDef[] = [
   {
-    id: "5s",
-    title: "5S & Kebersihan Area",
+    sectionId: "5s",
+    sectionTitle: "5S & Kebersihan Area",
     items: [
-      { id: "5s-1", point: "Area kerja bersih dan rapi", standard: "Tidak ada sampah/barang tidak perlu di area kerja", endMinutes: 7 * 60 + 30 },
-      { id: "5s-2", point: "Barang & tools pada tempatnya", standard: "Sesuai label/shadow board", endMinutes: 7 * 60 + 30 },
+      {
+        id: "g1",
+        point: "Area kerja bebas dari barang yang tidak diperlukan (Seiri)",
+        standard: "Tidak ada barang non-esensial menumpuk di area kerja",
+        endMinutes: 8 * 60,
+      },
+      {
+        id: "g2",
+        point: "Lantai dan jalur kerja bersih dari tumpahan atau sampah",
+        standard: "Lantai kering, bebas oli/serpihan, jalur evakuasi tidak terhalang",
+        endMinutes: 9 * 60,
+      },
     ],
   },
   {
-    id: "safety",
-    title: "Safety",
+    sectionId: "safety",
+    sectionTitle: "Safety",
     items: [
-      { id: "safety-1", point: "APD digunakan dengan benar", standard: "Helm, sepatu safety, sarung tangan sesuai SOP", endMinutes: 8 * 60 },
-      { id: "safety-2", point: "Jalur evakuasi tidak terhalang", standard: "Bebas dari barang/obstacle", endMinutes: 8 * 60 },
+      {
+        id: "s1",
+        point: "APD digunakan dengan benar",
+        standard: "Seluruh operator memakai APD lengkap sesuai SOP (helm, sarung tangan, safety shoes, dll)",
+        endMinutes: 10 * 60,
+      },
+      {
+        id: "s2",
+        point: "Jalur darurat dan APAR tidak terhalang",
+        standard: "Akses ke APAR dan pintu darurat bebas dari halangan barang/mesin",
+        endMinutes: 11 * 60,
+      },
     ],
   },
   {
-    id: "quality",
-    title: "Quality",
+    sectionId: "quality",
+    sectionTitle: "Quality",
     items: [
-      { id: "quality-1", point: "Produk sesuai standar kualitas", standard: "Tidak ada defect visual", endMinutes: 9 * 60 + 30 },
+      {
+        id: "q1",
+        point: "Spot check kualitas produk sesuai standar",
+        standard: "Sample produk sesuai spesifikasi, tidak ditemukan NG visual",
+        endMinutes: 13 * 60,
+      },
     ],
   },
   {
-    id: "machine",
-    title: "Kondisi Mesin",
+    sectionId: "mesin",
+    sectionTitle: "Kondisi Mesin",
     items: [
-      { id: "machine-1", point: "Kondisi mesin normal", standard: "Tidak ada suara/getaran abnormal", endMinutes: 10 * 60 },
-      { id: "machine-2", point: "Parameter mesin sesuai setting", standard: "Sesuai SOP parameter produksi", endMinutes: 10 * 60 },
+      {
+        id: "m1",
+        point: "Mesin beroperasi tanpa suara atau getaran abnormal",
+        standard: "Tidak ada indikasi abnormal pada mesin utama saat berjalan",
+        endMinutes: 14 * 60,
+      },
+      {
+        id: "m2",
+        point: "Parameter mesin (suhu, tekanan, kecepatan) sesuai standar",
+        standard: "Parameter mesin berada dalam rentang normal sesuai SOP",
+        endMinutes: 15 * 60,
+      },
     ],
   },
   {
-    id: "target",
-    title: "Target Produksi",
+    sectionId: "produksi",
+    sectionTitle: "Target Produksi",
     items: [
-      { id: "target-1", point: "Progress terhadap target harian", standard: "Sesuai rencana produksi", endMinutes: 14 * 60 },
+      {
+        id: "t1",
+        point: "Pencapaian target produksi sesuai rencana harian",
+        standard: "Output aktual memenuhi target harian, atau ada rencana recovery bila di bawah target",
+        endMinutes: 16 * 60,
+      },
     ],
   },
 ];
 
 /**
- * Membangun array item checklist genba kosong (belum dicek) untuk satu
- * entry baru — SEKARANG dari tabel genba_schedule_items (FR-11), bukan
- * dari GENBA_SCHEDULE statis di atas. Dipakai saat GET /api/genba tidak
- * menemukan row untuk tanggal yang diminta, dan sebagai fallback default
- * saat POST tanpa items. Pemanggil WAJIB memastikan `ensureSchema()` sudah
- * dipanggil lebih dulu di request yang sama (sudah begitu di kedua
- * pemanggil saat ini: GET & POST /api/genba).
+ * Bangun daftar GenbaItem kosong untuk entry baru, dari master checklist
+ * yang tersimpan di DB (genba_schedule_items, hanya yang isActive) — bisa
+ * diatur lewat UI di /genba/pengaturan (FR-11).
+ *
+ * Tiap item membawa salinan sectionTitle/point/standard/endMinutes sendiri
+ * (self-contained), supaya entry yang SUDAH TERSIMPAN tidak berubah kalau
+ * master checklist diedit belakangan.
  */
 export async function buildEmptyItems(): Promise<GenbaItem[]> {
-  const scheduleItems = await db
+  await ensureSchema();
+
+  const rows = await db
     .select()
     .from(genbaScheduleItems)
-    .where(eq(genbaScheduleItems.isActive, true))
+    .where(eq(genbaScheduleItems.isActive, 1))
     .orderBy(asc(genbaScheduleItems.sectionOrder), asc(genbaScheduleItems.itemOrder));
 
-  return scheduleItems.map((tpl) => ({
-    id: tpl.id,
-    sectionId: tpl.sectionId,
-    sectionTitle: tpl.sectionTitle,
-    point: tpl.point,
-    standard: tpl.standard,
-    endMinutes: tpl.endMinutes,
-    actual: "",
-    status: "na" as GenbaItemStatus,
-    note: "",
-    attachments: [],
-  }));
+  return rows.map(
+    (row): GenbaItem => ({
+      id: row.id,
+      sectionId: row.sectionId,
+      sectionTitle: row.sectionTitle,
+      point: row.point,
+      standard: row.standard,
+      endMinutes: row.endMinutes,
+      status: "pending",
+      actual: "",
+      note: "",
+      attachments: [],
+    })
+  );
 }

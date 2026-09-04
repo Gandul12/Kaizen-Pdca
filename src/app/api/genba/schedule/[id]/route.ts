@@ -2,18 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { db, ensureSchema } from "@/db";
 import { genbaScheduleItems } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { verifyGenbaPassword } from "@/lib/genbaAuth";
+import { requireGenbaAuth } from "@/lib/genbaAuth";
 
-// PATCH /api/genba/schedule/[id] — update sebagian field item checklist.
-// Body: { point?, standard?, endMinutes?, sectionOrder?, itemOrder?, isActive?, sectionId?, sectionTitle? }
+// PATCH — update parsial (point/standard/sectionTitle/endMinutes).
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authError = verifyGenbaPassword(req);
-  if (authError) return authError;
-
   try {
+    const authError = await requireGenbaAuth(req);
+    if (authError) return authError;
+
     await ensureSchema();
     const { id } = await params;
     const body = await req.json().catch(() => ({}));
@@ -25,19 +24,26 @@ export async function PATCH(
       .limit(1);
 
     if (!existing.length) {
-      return NextResponse.json({ success: false, error: "Item checklist tidak ditemukan" }, { status: 404 });
+      return NextResponse.json(
+        { success: false, error: "Item checklist tidak ditemukan." },
+        { status: 404 }
+      );
     }
 
     const updateData: any = { updatedAt: new Date() };
-
     if (body.point !== undefined) updateData.point = body.point;
     if (body.standard !== undefined) updateData.standard = body.standard;
-    if (body.endMinutes !== undefined) updateData.endMinutes = body.endMinutes;
-    if (body.sectionOrder !== undefined) updateData.sectionOrder = body.sectionOrder;
-    if (body.itemOrder !== undefined) updateData.itemOrder = body.itemOrder;
-    if (body.isActive !== undefined) updateData.isActive = body.isActive;
-    if (body.sectionId !== undefined) updateData.sectionId = body.sectionId;
     if (body.sectionTitle !== undefined) updateData.sectionTitle = body.sectionTitle;
+    if (body.endMinutes !== undefined) {
+      const em = Number(body.endMinutes);
+      if (!Number.isFinite(em)) {
+        return NextResponse.json(
+          { success: false, error: "Jam tenggat tidak valid." },
+          { status: 400 }
+        );
+      }
+      updateData.endMinutes = Math.round(em);
+    }
 
     await db.update(genbaScheduleItems).set(updateData).where(eq(genbaScheduleItems.id, id));
 
@@ -54,18 +60,16 @@ export async function PATCH(
   }
 }
 
-// DELETE /api/genba/schedule/[id] — SOFT delete (set isActive: false), BUKAN
-// hard delete. Entry genba lama yang sudah menyimpan salinan item ini
-// (di kolom items jsonb) tidak terpengaruh sama sekali; item hanya berhenti
-// muncul sebagai template untuk entry BARU ke depannya.
+// DELETE — SOFT delete (isActive:false), BUKAN hapus baris, supaya referensi
+// id lama di entry genba historis (self-contained) tidak pernah putus.
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authError = verifyGenbaPassword(req);
-  if (authError) return authError;
-
   try {
+    const authError = await requireGenbaAuth(req);
+    if (authError) return authError;
+
     await ensureSchema();
     const { id } = await params;
 
@@ -76,15 +80,18 @@ export async function DELETE(
       .limit(1);
 
     if (!existing.length) {
-      return NextResponse.json({ success: false, error: "Item checklist tidak ditemukan" }, { status: 404 });
+      return NextResponse.json(
+        { success: false, error: "Item checklist tidak ditemukan." },
+        { status: 404 }
+      );
     }
 
     await db
       .update(genbaScheduleItems)
-      .set({ isActive: false, updatedAt: new Date() })
+      .set({ isActive: 0, updatedAt: new Date() })
       .where(eq(genbaScheduleItems.id, id));
 
-    return NextResponse.json({ success: true, message: "Item checklist dinonaktifkan (soft delete)" });
+    return NextResponse.json({ success: true, message: "Item checklist berhasil dinonaktifkan." });
   } catch (error: any) {
     console.error("DELETE /api/genba/schedule/[id] error:", error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

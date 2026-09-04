@@ -1,0 +1,91 @@
+/**
+ * ⚠️ BELUM AKTIF — ekstensi file sengaja ".ts.example", BUKAN ".ts".
+ *
+ * tsconfig.json project ini men-typecheck SEMUA "**\/*.ts" (termasuk file
+ * yang tidak diimpor siapa pun) — kalau file ini disimpan sebagai ".ts"
+ * padahal package "@upstash/redis" belum ter-install, `npm run typecheck`
+ * dan `npm run build` akan GAGAL TOTAL. Makanya sengaja diberi akhiran
+ * ".example" supaya diabaikan compiler sampai kamu sengaja aktifkan.
+ *
+ * ── Kenapa ini dibutuhkan ──
+ * rateLimiter.ts (yang aktif sekarang) pakai in-memory Map — di Vercel/
+ * serverless ini TIDAK reliable: tiap cold start Map-nya kosong lagi, dan
+ * instance paralel tidak berbagi state. Efeknya, brute-force protection
+ * untuk /unlock, admin, DAN genba (GENBA_PASSWORD) bisa dilewati dengan
+ * memicu banyak cold start / request paralel.
+ *
+ * ── Cara aktifkan ──
+ *   1. npm install @upstash/redis
+ *   2. Buat database di https://console.upstash.com (tier gratis cukup
+ *      untuk trafik kecil-menengah)
+ *   3. Set env var: UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN
+ *   4. Rename file ini jadi "rateLimiter.upstash.ts" (hapus ".example")
+ *   5. Ganti semua baris:
+ *        import { isBlocked, recordFailure, recordSuccess } from "@/lib/rateLimiter";
+ *      jadi:
+ *        import { isBlocked, recordFailure, recordSuccess } from "@/lib/rateLimiter.upstash";
+ *      Cek semua pemakainya dulu: grep -rn "from \"@/lib/rateLimiter\"" src
+ *      (setidaknya ada di src/lib/requestHelpers.ts dan src/lib/genbaAuth.ts)
+ *   6. Setelah yakin semua pindah, boleh hapus rateLimiter.ts yang lama.
+ *
+ * Signature fungsi di bawah IDENTIK dengan rateLimiter.ts — jadi langkah 5
+ * di atas murni ganti satu baris import per file, tidak ada kode lain yang
+ * perlu diubah.
+ */
+
+import { Redis } from "@upstash/redis";
+
+const redis = Redis.fromEnv();
+
+function getKey(namespace: string, ip: string): string {
+  return `ratelimit:${namespace}::${ip}`;
+}
+
+/**
+ * Check whether this IP is blocked for the given namespace.
+ * Sama seperti versi in-memory: hanya percobaan GAGAL yang dihitung.
+ */
+export async function isBlocked(
+  namespace: string,
+  ip: string,
+  maxAttempts: number,
+  windowMs: number
+): Promise<{ blocked: false } | { blocked: true; retryAfterSeconds: number }> {
+  const key = getKey(namespace, ip);
+  const windowSeconds = Math.ceil(windowMs / 1000);
+
+  const count = await redis.get<number>(key);
+  if (!count || count < maxAttempts) {
+    return { blocked: false };
+  }
+
+  const ttl = await redis.ttl(key);
+  const retryAfterSeconds = ttl && ttl > 0 ? ttl : windowSeconds;
+  return { blocked: true, retryAfterSeconds };
+}
+
+/**
+ * Record a failed attempt. INCR + set TTL hanya saat pertama kali dibuat
+ * (supaya window bergulir dari percobaan gagal PERTAMA, bukan diperpanjang
+ * terus tiap percobaan baru).
+ */
+export async function recordFailure(
+  namespace: string,
+  ip: string,
+  windowMs: number = 15 * 60 * 1000
+): Promise<void> {
+  const key = getKey(namespace, ip);
+  const windowSeconds = Math.ceil(windowMs / 1000);
+
+  const newCount = await redis.incr(key);
+  if (newCount === 1) {
+    await redis.expire(key, windowSeconds);
+  }
+}
+
+/**
+ * Reset counter setelah autentikasi berhasil.
+ */
+export async function recordSuccess(namespace: string, ip: string): Promise<void> {
+  await redis.del(getKey(namespace, ip));
+}

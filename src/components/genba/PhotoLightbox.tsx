@@ -4,15 +4,12 @@ import React, { useEffect } from "react";
 import { X } from "lucide-react";
 
 interface PhotoLightboxProps {
-  imageUrl: string;
-  caption?: string;
+  fileUrl: string;
+  fileName?: string;
   onClose: () => void;
 }
 
-// Overlay sederhana untuk melihat foto ukuran penuh. Strukturnya mengikuti
-// pola PasswordModal.tsx (backdrop fixed inset-0 z-50 + card relative z-10),
-// ditambah penutupan lewat tombol Esc.
-export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ imageUrl, caption, onClose }) => {
+export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ fileUrl, fileName, onClose }) => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -22,33 +19,26 @@ export const PhotoLightbox: React.FC<PhotoLightboxProps> = ({ imageUrl, caption,
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
-
-      {/* Foto */}
-      <div className="relative max-w-3xl max-h-[85vh] w-full z-10 flex flex-col items-center">
-        <button
-          onClick={onClose}
-          className="absolute -top-3 -right-3 bg-white text-slate-700 hover:text-slate-900 p-2 rounded-full shadow-lg z-20"
-          title="Tutup"
-        >
-          <X className="w-5 h-5" />
-        </button>
-
-        <img
-          src={imageUrl}
-          alt={caption || "Foto genba"}
-          className="max-w-full max-h-[80vh] rounded-lg shadow-2xl object-contain"
-          onClick={(e) => e.stopPropagation()}
-        />
-
-        {caption && (
-          <p className="text-white text-xs mt-2 text-center bg-black/40 px-3 py-1 rounded-full">
-            {caption}
-          </p>
-        )}
-      </div>
+    <div
+      className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+    >
+      <button
+        type="button"
+        onClick={onClose}
+        className="absolute top-4 right-4 text-white/80 hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors"
+        title="Tutup"
+      >
+        <X className="w-6 h-6" />
+      </button>
+      <img
+        src={fileUrl}
+        alt={fileName || "Foto genba"}
+        className="max-w-full max-h-full rounded-lg shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      />
     </div>
   );
 };

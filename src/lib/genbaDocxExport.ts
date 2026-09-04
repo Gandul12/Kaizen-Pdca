@@ -12,88 +12,187 @@ import {
   ShadingType,
   PageBreak,
 } from "docx";
-import { GenbaEntry, GenbaItem } from "@/types/genba";
-import { groupGenbaItemsBySection } from "@/lib/genbaItemGrouping";
+import type { GenbaEntry } from "@/types/genba";
 import { imageUrlToBuffer } from "@/lib/docxImageHelper";
+import { groupGenbaItemsBySection } from "@/lib/genbaItemGrouping";
 
-const DAY_NAMES_ID = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
-const MONTH_NAMES_ID_SHORT = [
-  "Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des",
-];
+// Batasi jumlah foto yang di-embed langsung ke dokumen supaya ukuran file
+// tidak membengkak kalau temuan hari itu punya banyak foto.
+const MAX_EMBEDDED_PHOTOS = 20;
 
-// Batas embed foto per item — sama untuk export harian & mingguan.
-const MAX_PHOTOS_PER_ITEM = 3;
-// Budget total foto yang diembed untuk export harian tunggal (1 hari).
-const MAX_TOTAL_EMBEDDED_IMAGES_DAILY = 20;
-// Budget total foto untuk export mingguan (lebih banyak hari, tapi tetap dibatasi).
-const MAX_TOTAL_EMBEDDED_IMAGES_WEEKLY = 30;
-// Kalau total foto di seluruh rentang mingguan melebihi ini, hanya foto dari
-// item yang punya catatan (temuan) yang diembed — sisanya jadi daftar link.
-const WEEKLY_PHOTO_RESTRICT_THRESHOLD = 15;
+const STATUS_LABEL: Record<string, string> = {
+  pending: "Belum Dicek",
+  ok: "OK",
+  ng: "NG",
+};
 
-export function formatDateIndonesian(dateStr: string): string {
-  const [y, m, d] = dateStr.split("-").map(Number);
-  const dateObj = new Date(y, m - 1, d);
-  return `${DAY_NAMES_ID[dateObj.getDay()]}, ${d} ${MONTH_NAMES_ID_SHORT[m - 1]} ${y}`;
+const STATUS_COLOR: Record<string, string> = {
+  pending: "94A3B8",
+  ok: "059669",
+  ng: "E11D48",
+};
+
+// Warna status Tindak Lanjut (corrective action) — konsisten dengan UI (abu-abu/amber/emerald)
+const CORRECTIVE_STATUS_LABEL: Record<string, string> = {
+  belum: "Belum",
+  proses: "Proses",
+  selesai: "Selesai",
+};
+
+const CORRECTIVE_STATUS_COLOR: Record<string, string> = {
+  belum: "94A3B8",
+  proses: "D97706",
+  selesai: "059669",
+};
+
+// Baris tambahan "Akar Masalah / Tindakan / Status" di bawah baris item —
+// di luar cell tabel utama (colSpan penuh), hanya muncul kalau item punya
+// correctiveAction. Dipakai di export harian maupun mingguan.
+function buildCorrectiveActionRow(item: { correctiveAction?: { rootCause: string; action: string; status: string } }): TableRow | null {
+  const ca = item.correctiveAction;
+  if (!ca) return null;
+
+  return new TableRow({
+    children: [
+      new TableCell({
+        columnSpan: 4,
+        shading: { fill: "FEF3C7", type: ShadingType.CLEAR },
+        children: [
+          new Paragraph({
+            children: [
+              new TextRun({ text: "Tindak Lanjut  ", bold: true, size: 17, color: "92400E" }),
+              new TextRun({
+                text: CORRECTIVE_STATUS_LABEL[ca.status] || ca.status,
+                bold: true,
+                size: 17,
+                color: CORRECTIVE_STATUS_COLOR[ca.status] || "334155",
+              }),
+            ],
+            spacing: { after: 30 },
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({ text: "Akar Masalah: ", bold: true, size: 17, color: "78350F" }),
+              new TextRun({ text: ca.rootCause || "-", size: 17, color: "78350F" }),
+            ],
+            spacing: { after: 20 },
+          }),
+          new Paragraph({
+            children: [
+              new TextRun({ text: "Tindakan: ", bold: true, size: 17, color: "78350F" }),
+              new TextRun({ text: ca.action || "-", size: 17, color: "78350F" }),
+            ],
+          }),
+        ],
+      }),
+    ],
+  });
 }
 
-function minutesToHHMM(minutes: number): string {
+function formatEndTime(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
-function statusLabel(status: GenbaItem["status"]): string {
-  if (status === "ok") return "✓ Selesai";
-  if (status === "ng") return "✗ NG";
-  return "Belum Dicek";
+function fmtDateHuman(dateStr: string): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const date = new Date(y, m - 1, d);
+  const days = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+  const months = [
+    "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+    "Juli", "Agustus", "September", "Oktober", "November", "Desember",
+  ];
+  return `${days[date.getDay()]}, ${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`;
 }
 
-// "Selesai dicek" untuk keperluan hitung rata-rata mingguan = status bukan
-// "na" (baik hasilnya ok maupun ng, keduanya berarti item sudah diperiksa).
-// Diekspor supaya UI (GenbaReportView) bisa memakai definisi yang sama
-// persis dengan yang dipakai di dalam dokumen, jadi angkanya selalu match.
-export function computeDayCompletionPercent(entry: GenbaEntry): number {
-  const total = entry.items.length;
-  if (total === 0) return 0;
-  const checked = entry.items.filter((it) => it.status !== "na").length;
-  return Math.round((checked / total) * 100);
-}
+export async function generateGenbaDocx(entry: GenbaEntry): Promise<Blob> {
+  const children: any[] = [];
 
-// Versi genba dari createLabelValueRow di docxExport.ts — field beda
-// (Leader/Line/Target, bukan field Kaizen), tapi gaya warna dipertahankan
-// sama (1E293B untuk label, 334155 untuk value) demi konsistensi visual.
-function createLabelValueRow(label: string, value: string) {
-  return new Paragraph({
-    children: [
-      new TextRun({ text: `${label}: `, bold: true, color: "1E293B" }),
-      new TextRun({ text: value || "-", color: "334155" }),
+  // --- Judul + tanggal ---
+  children.push(
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: "CHECKLIST GENBA HARIAN", bold: true, size: 28, color: "1E3A8A" })],
+      spacing: { after: 80 },
+    })
+  );
+  children.push(
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: fmtDateHuman(entry.date), bold: true, size: 20, color: "475569" })],
+      spacing: { after: 200 },
+    })
+  );
+
+  // --- Info Leader/Line/Target ---
+  const headerTable = new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [
+      new TableRow({
+        children: [
+          new TableCell({
+            width: { size: 25, type: WidthType.PERCENTAGE },
+            shading: { fill: "F1F5F9", type: ShadingType.CLEAR },
+            children: [new Paragraph({ children: [new TextRun({ text: "Line Leader", bold: true })] })],
+          }),
+          new TableCell({
+            width: { size: 75, type: WidthType.PERCENTAGE },
+            children: [new Paragraph({ text: entry.leaderName || "-" })],
+          }),
+        ],
+      }),
+      new TableRow({
+        children: [
+          new TableCell({
+            shading: { fill: "F1F5F9", type: ShadingType.CLEAR },
+            children: [new Paragraph({ children: [new TextRun({ text: "Nama Line", bold: true })] })],
+          }),
+          new TableCell({ children: [new Paragraph({ text: entry.lineName || "-" })] }),
+        ],
+      }),
+      new TableRow({
+        children: [
+          new TableCell({
+            shading: { fill: "F1F5F9", type: ShadingType.CLEAR },
+            children: [new Paragraph({ children: [new TextRun({ text: "Target Harian", bold: true })] })],
+          }),
+          new TableCell({ children: [new Paragraph({ text: entry.dailyTarget || "-" })] }),
+        ],
+      }),
     ],
-    spacing: { before: 60, after: 60 },
   });
-}
+  children.push(headerTable);
+  children.push(new Paragraph({ text: "", spacing: { after: 200 } }));
 
-function buildScheduleTable(sectionItems: GenbaItem[]): Table {
-  const rows: TableRow[] = [
+  // --- Tabel Jadwal (Jam / Status / Point+Standar+Aktual / Catatan) ---
+  children.push(
+    new Paragraph({
+      children: [new TextRun({ text: "JADWAL & TEMUAN", bold: true, size: 24, color: "1E3A8A" })],
+      spacing: { before: 100, after: 100 },
+    })
+  );
+
+  const scheduleRows: TableRow[] = [
     new TableRow({
       children: [
         new TableCell({
-          width: { size: 12, type: WidthType.PERCENTAGE },
+          width: { size: 10, type: WidthType.PERCENTAGE },
           shading: { fill: "E2E8F0", type: ShadingType.CLEAR },
           children: [new Paragraph({ children: [new TextRun({ text: "Jam", bold: true })] })],
         }),
         new TableCell({
-          width: { size: 16, type: WidthType.PERCENTAGE },
+          width: { size: 12, type: WidthType.PERCENTAGE },
           shading: { fill: "E2E8F0", type: ShadingType.CLEAR },
           children: [new Paragraph({ children: [new TextRun({ text: "Status", bold: true })] })],
         }),
         new TableCell({
-          width: { size: 36, type: WidthType.PERCENTAGE },
+          width: { size: 48, type: WidthType.PERCENTAGE },
           shading: { fill: "E2E8F0", type: ShadingType.CLEAR },
-          children: [new Paragraph({ children: [new TextRun({ text: "Aktivitas", bold: true })] })],
+          children: [new Paragraph({ children: [new TextRun({ text: "Point / Standar / Aktual", bold: true })] })],
         }),
         new TableCell({
-          width: { size: 36, type: WidthType.PERCENTAGE },
+          width: { size: 30, type: WidthType.PERCENTAGE },
           shading: { fill: "E2E8F0", type: ShadingType.CLEAR },
           children: [new Paragraph({ children: [new TextRun({ text: "Catatan", bold: true })] })],
         }),
@@ -101,236 +200,124 @@ function buildScheduleTable(sectionItems: GenbaItem[]): Table {
     }),
   ];
 
-  sectionItems.forEach((item) => {
-    rows.push(
+  const sections = groupGenbaItemsBySection(entry.items);
+  for (const section of sections) {
+    scheduleRows.push(
       new TableRow({
         children: [
-          new TableCell({ children: [new Paragraph({ text: minutesToHHMM(item.endMinutes) })] }),
-          new TableCell({ children: [new Paragraph({ text: statusLabel(item.status) })] }),
           new TableCell({
+            columnSpan: 4,
+            shading: { fill: "CBD5E1", type: ShadingType.CLEAR },
             children: [
-              new Paragraph({ children: [new TextRun({ text: item.point, bold: true })] }),
-              new Paragraph({
-                children: [new TextRun({ text: `Standar: ${item.standard}`, size: 18, color: "64748B" })],
-              }),
-              ...(item.actual
-                ? [
-                    new Paragraph({
-                      children: [
-                        new TextRun({
-                          text: `Aktual: ${item.actual}`,
-                          size: 18,
-                          color: item.status === "ng" ? "B91C1C" : "334155",
-                        }),
-                      ],
-                    }),
-                  ]
-                : []),
-              ...(item.correctiveAction
-                ? [
-                    new Paragraph({
-                      children: [
-                        new TextRun({
-                          text: `Akar Masalah: ${item.correctiveAction.rootCause}`,
-                          size: 18,
-                          color: "334155",
-                        }),
-                      ],
-                    }),
-                    new Paragraph({
-                      children: [
-                        new TextRun({
-                          text: `Tindakan: ${item.correctiveAction.action}`,
-                          size: 18,
-                          color: "334155",
-                        }),
-                      ],
-                    }),
-                    new Paragraph({
-                      children: [
-                        new TextRun({
-                          text: `Status: ${item.correctiveAction.status}`,
-                          bold: true,
-                          size: 18,
-                          color:
-                            item.correctiveAction.status === "selesai"
-                              ? "15803D"
-                              : item.correctiveAction.status === "proses"
-                              ? "B45309"
-                              : "64748B",
-                        }),
-                      ],
-                    }),
-                  ]
-                : []),
+              new Paragraph({ children: [new TextRun({ text: section.sectionTitle.toUpperCase(), bold: true, size: 18 })] }),
             ],
           }),
-          new TableCell({ children: [new Paragraph({ text: item.note || "-" })] }),
         ],
       })
     );
-  });
 
-  return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows });
-}
-
-interface EmbedBudget {
-  count: number;
-  max: number;
-  // Kalau true, foto hanya diembed untuk item yang punya catatan (dipakai
-  // saat rentang mingguan punya terlalu banyak foto) — sisanya jadi daftar link.
-  onlyEmbedForItemsWithNote: boolean;
-}
-
-/**
- * Membangun body satu entry genba: baris info Leader/Line/Target + tabel
- * jadwal per section + foto (di luar tabel). Dipakai ulang oleh export
- * harian (`generateGenbaDocx`) maupun tiap hari di export mingguan
- * (`generateGenbaWeeklyDocx`) supaya tidak ada duplikasi logika.
- */
-async function buildGenbaEntryBody(entry: GenbaEntry, budget: EmbedBudget): Promise<any[]> {
-  const children: any[] = [];
-
-  children.push(createLabelValueRow("Leader", entry.leaderName));
-  children.push(createLabelValueRow("Line / Area", entry.lineName || ""));
-  children.push(createLabelValueRow("Target Harian", entry.dailyTarget || ""));
-  children.push(new Paragraph({ text: "", spacing: { after: 120 } }));
-
-  for (const section of groupGenbaItemsBySection(entry.items)) {
-    const sectionItems = section.items;
-
-    children.push(
-      new Paragraph({
-        children: [new TextRun({ text: section.sectionTitle, bold: true, size: 22, color: "1E3A8A" })],
-        spacing: { before: 200, after: 100 },
-      })
-    );
-
-    children.push(buildScheduleTable(sectionItems));
-    children.push(new Paragraph({ text: "", spacing: { after: 100 } }));
-
-    // Foto per item — dirender di luar tabel (bukan di dalam cell) supaya
-    // layout tidak pecah, mengikuti pola gambar di docxExport.ts.
-    for (const item of sectionItems) {
-      const attachments = item.attachments || [];
-      if (attachments.length === 0) continue;
-
-      const hasNote = !!(item.note && item.note.trim());
-      const allowEmbedForThisItem = !budget.onlyEmbedForItemsWithNote || hasNote;
-
-      children.push(
-        new Paragraph({
-          children: [new TextRun({ text: `Foto — ${item.point}:`, bold: true, size: 20 })],
-          spacing: { before: 80, after: 60 },
+    for (const item of section.items) {
+      scheduleRows.push(
+        new TableRow({
+          children: [
+            new TableCell({ children: [new Paragraph({ text: formatEndTime(item.endMinutes) })] }),
+            new TableCell({
+              children: [
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: STATUS_LABEL[item.status] || item.status,
+                      bold: true,
+                      color: STATUS_COLOR[item.status] || "334155",
+                    }),
+                  ],
+                }),
+              ],
+            }),
+            new TableCell({
+              children: [
+                new Paragraph({ children: [new TextRun({ text: item.point, bold: true })] }),
+                new Paragraph({
+                  children: [new TextRun({ text: `Standar: ${item.standard}`, size: 18, color: "64748B" })],
+                }),
+                ...(item.actual
+                  ? [new Paragraph({ children: [new TextRun({ text: `Aktual: ${item.actual}`, size: 18 })] })]
+                  : []),
+              ],
+            }),
+            new TableCell({ children: [new Paragraph({ text: item.note || "-" })] }),
+          ],
         })
       );
 
-      let embeddedForItem = 0;
-      if (allowEmbedForThisItem) {
-        for (const att of attachments) {
-          if (embeddedForItem >= MAX_PHOTOS_PER_ITEM) break;
-          if (budget.count >= budget.max) break;
+      const correctiveRow = buildCorrectiveActionRow(item);
+      if (correctiveRow) scheduleRows.push(correctiveRow);
+    }
+  }
 
-          const res = await imageUrlToBuffer(att.fileUrl);
-          if (res) {
-            children.push(
-              new Paragraph({
-                children: [
-                  new ImageRun({
-                    data: res.buffer,
-                    transformation: { width: 250, height: 180 },
-                    type: res.extension === "jpg" ? "jpg" : "png",
-                  }),
-                ],
-                spacing: { after: 60 },
-              })
-            );
-            embeddedForItem++;
-            budget.count++;
-          }
-        }
-      }
+  children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: scheduleRows }));
+  children.push(new Paragraph({ text: "", spacing: { after: 200 } }));
 
-      const remaining = attachments.length - embeddedForItem;
-      if (remaining > 0) {
-        if (!allowEmbedForThisItem) {
-          // Rentang mingguan terlalu banyak foto & item ini tidak punya
-          // catatan — jangan diembed, cukup daftar link ke fotonya.
+  // --- Dokumentasi foto — DI LUAR cell tabel supaya layout tidak pecah ---
+  const itemsWithPhotos = entry.items.filter((it) => it.attachments && it.attachments.length > 0);
+  const totalPhotos = itemsWithPhotos.reduce((sum, it) => sum + it.attachments.length, 0);
+
+  if (itemsWithPhotos.length > 0) {
+    children.push(
+      new Paragraph({
+        children: [new TextRun({ text: "DOKUMENTASI FOTO", bold: true, size: 24, color: "1E3A8A" })],
+        spacing: { before: 100, after: 100 },
+      })
+    );
+
+    if (totalPhotos > MAX_EMBEDDED_PHOTOS) {
+      children.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: `Dokumen ini memiliki ${totalPhotos} foto. Untuk menjaga ukuran file, hanya ${MAX_EMBEDDED_PHOTOS} foto pertama yang disertakan.`,
+              italics: true,
+              size: 18,
+              color: "94A3B8",
+            }),
+          ],
+          spacing: { after: 100 },
+        })
+      );
+    }
+
+    let embeddedCount = 0;
+    for (const item of itemsWithPhotos) {
+      if (embeddedCount >= MAX_EMBEDDED_PHOTOS) break;
+
+      children.push(
+        new Paragraph({
+          children: [new TextRun({ text: item.point, bold: true, size: 20 })],
+          spacing: { before: 120, after: 60 },
+        })
+      );
+
+      for (const att of item.attachments) {
+        if (embeddedCount >= MAX_EMBEDDED_PHOTOS) break;
+        const res = await imageUrlToBuffer(att.fileUrl);
+        if (res) {
           children.push(
             new Paragraph({
               children: [
-                new TextRun({
-                  text: `${remaining} foto (tidak diembed, lihat link di bawah):`,
-                  italics: true,
-                  size: 18,
-                  color: "64748B",
-                }),
-              ],
-              spacing: { after: 40 },
-            })
-          );
-          attachments.slice(embeddedForItem).forEach((att) => {
-            children.push(
-              new Paragraph({
-                children: [new TextRun({ text: att.fileUrl, size: 16, color: "2563EB" })],
-                spacing: { after: 20 },
-              })
-            );
-          });
-        } else {
-          children.push(
-            new Paragraph({
-              children: [
-                new TextRun({
-                  text: `+${remaining} foto lainnya, lihat di web.`,
-                  italics: true,
-                  size: 18,
-                  color: "64748B",
+                new ImageRun({
+                  data: res.buffer,
+                  transformation: { width: 400, height: 260 },
+                  type: res.extension === "jpg" ? "jpg" : "png",
                 }),
               ],
               spacing: { after: 100 },
             })
           );
+          embeddedCount++;
         }
       }
     }
   }
-
-  return children;
-}
-
-export async function generateGenbaDocx(entry: GenbaEntry): Promise<Blob> {
-  const children: any[] = [];
-
-  // Title Block
-  children.push(
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [
-        new TextRun({ text: "CHECKLIST GENBA HARIAN", bold: true, size: 28, color: "1E3A8A" }),
-      ],
-      spacing: { after: 80 },
-    })
-  );
-  children.push(
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [
-        new TextRun({ text: formatDateIndonesian(entry.date), bold: true, size: 20, color: "475569" }),
-      ],
-      spacing: { after: 200 },
-    })
-  );
-
-  // Budget gambar identik dengan versi sebelum refactor (max 20, tanpa
-  // pembatasan "hanya item bercatatan") — supaya hasil export harian
-  // TIDAK berubah sama sekali dibanding sebelum FR-7.
-  const budget: EmbedBudget = {
-    count: 0,
-    max: MAX_TOTAL_EMBEDDED_IMAGES_DAILY,
-    onlyEmbedForItemsWithNote: false,
-  };
-  children.push(...(await buildGenbaEntryBody(entry, budget)));
 
   const doc = new Document({
     sections: [
@@ -344,24 +331,300 @@ export async function generateGenbaDocx(entry: GenbaEntry): Promise<Blob> {
   return await Packer.toBlob(doc);
 }
 
-/**
- * Export mingguan: halaman ringkasan (rentang tanggal, total hari, rata-rata
- * % checklist selesai) diikuti satu section per hari, dipisah `PageBreak`.
- */
-export async function generateGenbaWeeklyDocx(entries: GenbaEntry[]): Promise<Blob> {
+// ═══════════════════════════════════════════════════════════════════════
+// Export mingguan (FR-7) — perluasan, TIDAK memanggil/mengubah
+// generateGenbaDocx di atas. Sengaja sedikit duplikasi struktur tabel per
+// hari supaya export harian yang sudah ada nol risiko regresi.
+// ═══════════════════════════════════════════════════════════════════════
+
+// Ambang jumlah foto se-rentang laporan: di atas ini, hanya foto pada item
+// yang punya catatan yang di-embed; sisanya jadi daftar link teks.
+const WEEKLY_PHOTO_THRESHOLD = 15;
+
+function createSummaryLine(label: string, value: string) {
+  return new Paragraph({
+    children: [
+      new TextRun({ text: `${label}: `, bold: true, color: "1E293B" }),
+      new TextRun({ text: value, color: "334155" }),
+    ],
+    spacing: { before: 60, after: 60 },
+  });
+}
+
+// Bangun children docx untuk SATU hari (dipakai berulang di dalam laporan
+// mingguan). embedAllPhotos=false berarti hanya foto pada item yang punya
+// catatan yang di-embed; sisanya ditulis sebagai daftar link teks.
+async function buildWeeklyDaySectionChildren(
+  entry: GenbaEntry,
+  embedAllPhotos: boolean,
+  embedCounter: { count: number }
+): Promise<any[]> {
   const children: any[] = [];
 
-  const sortedEntries = [...entries].sort((a, b) => a.date.localeCompare(b.date));
-  const startDate = sortedEntries[0]?.date;
-  const endDate = sortedEntries[sortedEntries.length - 1]?.date;
+  children.push(
+    new Paragraph({
+      alignment: AlignmentType.CENTER,
+      children: [new TextRun({ text: fmtDateHuman(entry.date), bold: true, size: 24, color: "1E3A8A" })],
+      spacing: { after: 150 },
+    })
+  );
+
+  const headerTable = new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows: [
+      new TableRow({
+        children: [
+          new TableCell({
+            width: { size: 25, type: WidthType.PERCENTAGE },
+            shading: { fill: "F1F5F9", type: ShadingType.CLEAR },
+            children: [new Paragraph({ children: [new TextRun({ text: "Line Leader", bold: true })] })],
+          }),
+          new TableCell({
+            width: { size: 75, type: WidthType.PERCENTAGE },
+            children: [new Paragraph({ text: entry.leaderName || "-" })],
+          }),
+        ],
+      }),
+      new TableRow({
+        children: [
+          new TableCell({
+            shading: { fill: "F1F5F9", type: ShadingType.CLEAR },
+            children: [new Paragraph({ children: [new TextRun({ text: "Nama Line", bold: true })] })],
+          }),
+          new TableCell({ children: [new Paragraph({ text: entry.lineName || "-" })] }),
+        ],
+      }),
+      new TableRow({
+        children: [
+          new TableCell({
+            shading: { fill: "F1F5F9", type: ShadingType.CLEAR },
+            children: [new Paragraph({ children: [new TextRun({ text: "Target Harian", bold: true })] })],
+          }),
+          new TableCell({ children: [new Paragraph({ text: entry.dailyTarget || "-" })] }),
+        ],
+      }),
+    ],
+  });
+  children.push(headerTable);
+  children.push(new Paragraph({ text: "", spacing: { after: 150 } }));
+
+  const scheduleRows: TableRow[] = [
+    new TableRow({
+      children: [
+        new TableCell({
+          width: { size: 10, type: WidthType.PERCENTAGE },
+          shading: { fill: "E2E8F0", type: ShadingType.CLEAR },
+          children: [new Paragraph({ children: [new TextRun({ text: "Jam", bold: true })] })],
+        }),
+        new TableCell({
+          width: { size: 12, type: WidthType.PERCENTAGE },
+          shading: { fill: "E2E8F0", type: ShadingType.CLEAR },
+          children: [new Paragraph({ children: [new TextRun({ text: "Status", bold: true })] })],
+        }),
+        new TableCell({
+          width: { size: 48, type: WidthType.PERCENTAGE },
+          shading: { fill: "E2E8F0", type: ShadingType.CLEAR },
+          children: [new Paragraph({ children: [new TextRun({ text: "Point / Standar / Aktual", bold: true })] })],
+        }),
+        new TableCell({
+          width: { size: 30, type: WidthType.PERCENTAGE },
+          shading: { fill: "E2E8F0", type: ShadingType.CLEAR },
+          children: [new Paragraph({ children: [new TextRun({ text: "Catatan", bold: true })] })],
+        }),
+      ],
+    }),
+  ];
+
+  const sections = groupGenbaItemsBySection(entry.items);
+  for (const section of sections) {
+    scheduleRows.push(
+      new TableRow({
+        children: [
+          new TableCell({
+            columnSpan: 4,
+            shading: { fill: "CBD5E1", type: ShadingType.CLEAR },
+            children: [
+              new Paragraph({ children: [new TextRun({ text: section.sectionTitle.toUpperCase(), bold: true, size: 18 })] }),
+            ],
+          }),
+        ],
+      })
+    );
+
+    for (const item of section.items) {
+      scheduleRows.push(
+        new TableRow({
+          children: [
+            new TableCell({ children: [new Paragraph({ text: formatEndTime(item.endMinutes) })] }),
+            new TableCell({
+              children: [
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: STATUS_LABEL[item.status] || item.status,
+                      bold: true,
+                      color: STATUS_COLOR[item.status] || "334155",
+                    }),
+                  ],
+                }),
+              ],
+            }),
+            new TableCell({
+              children: [
+                new Paragraph({ children: [new TextRun({ text: item.point, bold: true })] }),
+                new Paragraph({
+                  children: [new TextRun({ text: `Standar: ${item.standard}`, size: 18, color: "64748B" })],
+                }),
+                ...(item.actual
+                  ? [new Paragraph({ children: [new TextRun({ text: `Aktual: ${item.actual}`, size: 18 })] })]
+                  : []),
+              ],
+            }),
+            new TableCell({ children: [new Paragraph({ text: item.note || "-" })] }),
+          ],
+        })
+      );
+
+      const correctiveRow = buildCorrectiveActionRow(item);
+      if (correctiveRow) scheduleRows.push(correctiveRow);
+    }
+  }
+
+  children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: scheduleRows }));
+  children.push(new Paragraph({ text: "", spacing: { after: 150 } }));
+
+  // --- Foto hari ini: embed penuh, atau hanya item yang punya catatan ---
+  const itemsWithPhotos = entry.items.filter((it) => it.attachments && it.attachments.length > 0);
+  if (itemsWithPhotos.length > 0) {
+    const linkOnlyLines: string[] = [];
+    const itemsToEmbed = itemsWithPhotos.filter((it) => embedAllPhotos || !!it.note?.trim());
+    const itemsLinkOnly = itemsWithPhotos.filter((it) => !embedAllPhotos && !it.note?.trim());
+
+    if (itemsToEmbed.length > 0 || itemsLinkOnly.length > 0) {
+      children.push(
+        new Paragraph({
+          children: [new TextRun({ text: "DOKUMENTASI FOTO", bold: true, size: 24, color: "1E3A8A" })],
+          spacing: { before: 100, after: 100 },
+        })
+      );
+    }
+
+    for (const item of itemsToEmbed) {
+      if (embedCounter.count >= MAX_EMBEDDED_PHOTOS) {
+        // Kuota embed global sudah habis — sisanya jadi link juga.
+        item.attachments.forEach((att) => linkOnlyLines.push(`${item.point}: ${att.fileUrl}`));
+        continue;
+      }
+
+      children.push(
+        new Paragraph({
+          children: [new TextRun({ text: item.point, bold: true, size: 20 })],
+          spacing: { before: 120, after: 60 },
+        })
+      );
+
+      for (const att of item.attachments) {
+        if (embedCounter.count >= MAX_EMBEDDED_PHOTOS) {
+          linkOnlyLines.push(`${item.point}: ${att.fileUrl}`);
+          continue;
+        }
+        const res = await imageUrlToBuffer(att.fileUrl);
+        if (res) {
+          children.push(
+            new Paragraph({
+              children: [
+                new ImageRun({
+                  data: res.buffer,
+                  transformation: { width: 400, height: 260 },
+                  type: res.extension === "jpg" ? "jpg" : "png",
+                }),
+              ],
+              spacing: { after: 100 },
+            })
+          );
+          embedCounter.count++;
+        }
+      }
+    }
+
+    for (const item of itemsLinkOnly) {
+      item.attachments.forEach((att) => linkOnlyLines.push(`${item.point}: ${att.fileUrl}`));
+    }
+
+    if (linkOnlyLines.length > 0) {
+      children.push(
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: "Foto lain (tidak di-embed untuk menjaga ukuran file) — link berikut:",
+              italics: true,
+              size: 18,
+              color: "94A3B8",
+            }),
+          ],
+          spacing: { before: 60, after: 40 },
+        })
+      );
+      linkOnlyLines.forEach((line) => {
+        children.push(
+          new Paragraph({
+            children: [new TextRun({ text: `• ${line}`, size: 18, color: "475569" })],
+            spacing: { after: 20 },
+          })
+        );
+      });
+    }
+  }
+
+  return children;
+}
+
+export async function generateGenbaWeeklyDocx(entries: GenbaEntry[]): Promise<Blob> {
+  if (!entries || entries.length === 0) {
+    throw new Error("Tidak ada data genba pada rentang tanggal yang dipilih.");
+  }
+
+  const sorted = [...entries].sort((a, b) => a.date.localeCompare(b.date));
+  const startDate = sorted[0].date;
+  const endDate = sorted[sorted.length - 1].date;
+
+  const dayStats = sorted.map((entry) => {
+    const total = entry.items.length;
+    const done = entry.items.filter((it) => it.status !== "pending").length;
+    const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+    return { date: entry.date, total, done, percent };
+  });
+  const avgPercent =
+    dayStats.length > 0
+      ? Math.round(dayStats.reduce((sum, d) => sum + d.percent, 0) / dayStats.length)
+      : 0;
+
+  const totalPhotos = sorted.reduce(
+    (sum, entry) => sum + entry.items.reduce((s, it) => s + (it.attachments?.length || 0), 0),
+    0
+  );
+  const embedAllPhotos = totalPhotos <= WEEKLY_PHOTO_THRESHOLD;
+
+  // Hitungan item dengan corrective action, dipecah per status.
+  const correctiveCounts = { belum: 0, proses: 0, selesai: 0 };
+  let correctiveTotal = 0;
+  sorted.forEach((e) => {
+    e.items.forEach((it) => {
+      if (it.correctiveAction) {
+        correctiveTotal++;
+        const st = it.correctiveAction.status as keyof typeof correctiveCounts;
+        if (correctiveCounts[st] !== undefined) correctiveCounts[st]++;
+      }
+    });
+  });
+
+  const children: any[] = [];
 
   // --- Halaman ringkasan ---
   children.push(
     new Paragraph({
       alignment: AlignmentType.CENTER,
-      children: [
-        new TextRun({ text: "LAPORAN MINGGUAN CHECKLIST GENBA", bold: true, size: 28, color: "1E3A8A" }),
-      ],
+      children: [new TextRun({ text: "LAPORAN MINGGUAN GENBA HARIAN", bold: true, size: 28, color: "1E3A8A" })],
       spacing: { after: 80 },
     })
   );
@@ -370,7 +633,7 @@ export async function generateGenbaWeeklyDocx(entries: GenbaEntry[]): Promise<Bl
       alignment: AlignmentType.CENTER,
       children: [
         new TextRun({
-          text: startDate && endDate ? `${formatDateIndonesian(startDate)} — ${formatDateIndonesian(endDate)}` : "-",
+          text: `${fmtDateHuman(startDate)} — ${fmtDateHuman(endDate)}`,
           bold: true,
           size: 20,
           color: "475569",
@@ -380,77 +643,55 @@ export async function generateGenbaWeeklyDocx(entries: GenbaEntry[]): Promise<Bl
     })
   );
 
-  const totalDays = sortedEntries.length;
-  const avgPercent =
-    totalDays > 0
-      ? Math.round(sortedEntries.reduce((sum, e) => sum + computeDayCompletionPercent(e), 0) / totalDays)
-      : 0;
+  children.push(createSummaryLine("Total Hari Tercatat", `${sorted.length} hari`));
+  children.push(createSummaryLine("Rata-rata Checklist Selesai", `${avgPercent}%`));
+  if (correctiveTotal > 0) {
+    children.push(
+      createSummaryLine(
+        "Item dengan Tindak Lanjut",
+        `${correctiveTotal} item (Belum: ${correctiveCounts.belum}, Proses: ${correctiveCounts.proses}, Selesai: ${correctiveCounts.selesai})`
+      )
+    );
+  }
+  children.push(new Paragraph({ text: "", spacing: { after: 100 } }));
 
-  children.push(createLabelValueRow("Total Hari Tercatat", String(totalDays)));
-  children.push(createLabelValueRow("Rata-rata Checklist Selesai per Hari", `${avgPercent}%`));
-  children.push(new Paragraph({ text: "", spacing: { after: 120 } }));
-
-  // Tabel ringkasan per hari
   const summaryRows: TableRow[] = [
     new TableRow({
       children: [
         new TableCell({
-          width: { size: 30, type: WidthType.PERCENTAGE },
           shading: { fill: "E2E8F0", type: ShadingType.CLEAR },
           children: [new Paragraph({ children: [new TextRun({ text: "Tanggal", bold: true })] })],
         }),
         new TableCell({
-          width: { size: 30, type: WidthType.PERCENTAGE },
           shading: { fill: "E2E8F0", type: ShadingType.CLEAR },
-          children: [new Paragraph({ children: [new TextRun({ text: "Leader", bold: true })] })],
+          children: [new Paragraph({ children: [new TextRun({ text: "Selesai", bold: true })] })],
         }),
         new TableCell({
-          width: { size: 40, type: WidthType.PERCENTAGE },
           shading: { fill: "E2E8F0", type: ShadingType.CLEAR },
-          children: [new Paragraph({ children: [new TextRun({ text: "Checklist Selesai", bold: true })] })],
+          children: [new Paragraph({ children: [new TextRun({ text: "Persentase", bold: true })] })],
         }),
       ],
     }),
   ];
-  sortedEntries.forEach((entry) => {
+  dayStats.forEach((d) => {
     summaryRows.push(
       new TableRow({
         children: [
-          new TableCell({ children: [new Paragraph({ text: formatDateIndonesian(entry.date) })] }),
-          new TableCell({ children: [new Paragraph({ text: entry.leaderName || "-" })] }),
-          new TableCell({ children: [new Paragraph({ text: `${computeDayCompletionPercent(entry)}%` })] }),
+          new TableCell({ children: [new Paragraph({ text: fmtDateHuman(d.date) })] }),
+          new TableCell({ children: [new Paragraph({ text: `${d.done}/${d.total}` })] }),
+          new TableCell({ children: [new Paragraph({ text: `${d.percent}%` })] }),
         ],
       })
     );
   });
   children.push(new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: summaryRows }));
 
-  // Hitung total foto di seluruh rentang untuk tentukan strategi embed.
-  let totalAttachments = 0;
-  sortedEntries.forEach((entry) => {
-    entry.items.forEach((item) => {
-      totalAttachments += (item.attachments || []).length;
-    });
-  });
-  const onlyEmbedForItemsWithNote = totalAttachments > WEEKLY_PHOTO_RESTRICT_THRESHOLD;
-
-  const budget: EmbedBudget = {
-    count: 0,
-    max: MAX_TOTAL_EMBEDDED_IMAGES_WEEKLY,
-    onlyEmbedForItemsWithNote,
-  };
-
-  // --- Satu section per hari, dipisah PageBreak ---
-  // Gotcha docx: PageBreak harus ada di dalam Paragraph.
-  for (const entry of sortedEntries) {
+  // --- Tiap hari sebagai section terpisah, dipisah PageBreak ---
+  const embedCounter = { count: 0 };
+  for (const entry of sorted) {
     children.push(new Paragraph({ children: [new PageBreak()] }));
-    children.push(
-      new Paragraph({
-        children: [new TextRun({ text: formatDateIndonesian(entry.date), bold: true, size: 24, color: "1E3A8A" })],
-        spacing: { after: 120 },
-      })
-    );
-    children.push(...(await buildGenbaEntryBody(entry, budget)));
+    const dayChildren = await buildWeeklyDaySectionChildren(entry, embedAllPhotos, embedCounter);
+    children.push(...dayChildren);
   }
 
   const doc = new Document({

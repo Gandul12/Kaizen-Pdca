@@ -12,8 +12,12 @@ export async function POST(
     const body = await req.json().catch(() => ({}));
     const exportType = body.exportType || "pdf";
 
+    let action: "project_exported_pdf" | "project_exported_docx" | "project_exported_pptx" = "project_exported_pdf";
+    if (exportType === "docx") action = "project_exported_docx";
+    else if (exportType === "pptx") action = "project_exported_pptx";
+
     await logActivity({
-      action: exportType === "docx" ? "project_exported_docx" : "project_exported_pdf",
+      action,
       projectId: id,
       detail: `Exported as ${exportType.toUpperCase()}`,
       ipAddress: req.headers.get("x-forwarded-for") || "",

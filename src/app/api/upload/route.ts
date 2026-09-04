@@ -2,14 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import { ensureSchema } from "@/db";
 import { put } from "@vercel/blob";
 import crypto from "crypto";
+import fs from "fs/promises";
+import path from "path";
 import { validateFileSignature } from "@/lib/fileSignature";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
 
-const ALLOWED_EXTENSIONS = [
-  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
-  ".pdf", ".doc", ".docx", ".xls", ".xlsx",
-];
+// SECURITY: sebelumnya juga mengizinkan .svg/.pdf/.doc/.docx/.xls/.xlsx —
+// sudah dicek, TIDAK ADA satu pun caller /api/upload di seluruh app (step
+// editor, genba) yang memakai selain foto (semua accept="image/*"). SVG
+// berisiko stored-XSS (bisa berisi <script>, disajikan sebagai public URL),
+// dan validasi docx/xlsx sebelumnya cuma cek magic-number ZIP generik —
+// zip apa pun lolos asal namanya .docx. Dipersempit ke gambar saja.
+const ALLOWED_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
 
 function getExtension(filename: string): string {
   const dotIndex = filename.lastIndexOf(".");
@@ -20,35 +26,19 @@ function getExtension(filename: string): string {
 export async function POST(req: NextRequest) {
   try {
     await ensureSchema();
-    // ── 1. Check that BLOB_READ_WRITE_TOKEN is configured ──
-    if (!process.env.BLOB_READ_WRITE_TOKEN) {
-      console.error(
-        "BLOB_READ_WRITE_TOKEN is not set. " +
-        "Please add the Vercel Blob store to your project and set the token in environment variables."
-      );
-      return NextResponse.json(
-        {
-          success: false,
-          error:
-            "Upload tidak tersedia: BLOB_READ_WRITE_TOKEN belum dikonfigurasi di server. " +
-            "Hubungi administrator untuk mengaktifkan Vercel Blob Storage.",
-        },
-        { status: 503 }
-      );
-    }
 
-    // ── 2. Parse multipart form ──
+    // ── 1. Parse multipart form ──
     const formData = await req.formData();
     const file = formData.get("file") as File | null;
 
     if (!file) {
       return NextResponse.json(
-        { success: false, error: "No file provided" },
+        { success: false, error: "Tidak ada file yang diunggah." },
         { status: 400 }
       );
     }
 
-    // ── 3. Validate file size ──
+    // ── 2. Validate file size ──
     if (file.size > MAX_FILE_SIZE) {
       return NextResponse.json(
         { success: false, error: "Ukuran file melebihi batas 5 MB." },
@@ -56,7 +46,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ── 4. Validate extension ──
+    // ── 3. Validate extension ──
     const originalName = file.name || "upload";
     const ext = getExtension(originalName) || ".png";
 
@@ -70,7 +60,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ── 5. Validate file content (magic-number / signature check) ──
+    // ── 4. Validate file content (magic-number / signature check) ──
     const arrayBuffer = await file.arrayBuffer();
     const fileBytes = new Uint8Array(arrayBuffer);
 
@@ -82,23 +72,38 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ── 6. Generate unique blob pathname ──
+    // ── 5. Generate unique filename ──
     const uniqueId = crypto.randomBytes(8).toString("hex");
     const timestamp = Date.now();
-    const blobPathname = `kaizen-uploads/${timestamp}-${uniqueId}${ext}`;
+    const fileName = `${timestamp}-${uniqueId}${ext}`;
 
-    // ── 7. Upload to Vercel Blob ──
-    // Re-create a Blob from the already-read bytes so @vercel/blob can consume it.
-    const uploadBlob = new Blob([fileBytes], { type: file.type || "application/octet-stream" });
-    const blob = await put(blobPathname, uploadBlob, {
-      access: "public",
-      addRandomSuffix: false,
-    });
+    let fileUrl = "";
 
-    // ── 8. Return response (same shape the frontend expects) ──
+    // ── 6. Try Vercel Blob if token is set, else fallback to local disk storage ──
+    if (process.env.BLOB_READ_WRITE_TOKEN) {
+      try {
+        const uploadBlob = new Blob([fileBytes], { type: file.type || "application/octet-stream" });
+        const blob = await put(`kaizen-uploads/${fileName}`, uploadBlob, {
+          access: "public",
+          addRandomSuffix: false,
+        });
+        fileUrl = blob.url;
+      } catch (blobError: any) {
+        console.warn("Vercel Blob upload failed, falling back to local disk storage:", blobError);
+      }
+    }
+
+    // Fallback: save to local disk public/uploads/
+    if (!fileUrl) {
+      await fs.mkdir(UPLOAD_DIR, { recursive: true });
+      const filePath = path.join(UPLOAD_DIR, fileName);
+      await fs.writeFile(filePath, Buffer.from(fileBytes));
+      fileUrl = `/uploads/${fileName}`;
+    }
+
     return NextResponse.json({
       success: true,
-      fileUrl: blob.url,
+      fileUrl,
       fileName: originalName,
       fileSize: file.size,
       mimeType: file.type || "application/octet-stream",
@@ -106,7 +111,7 @@ export async function POST(req: NextRequest) {
   } catch (error: any) {
     console.error("Upload handler error:", error);
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: error.message || "Gagal mengunggah file." },
       { status: 500 }
     );
   }

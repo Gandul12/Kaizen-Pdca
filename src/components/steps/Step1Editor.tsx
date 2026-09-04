@@ -116,7 +116,7 @@ export const Step1Editor: React.FC<Step1EditorProps> = ({ data, onChange }) => {
             value={data.standard || ""}
             onChange={(e) => handleTextChange("standard", e.target.value)}
             placeholder="Contoh: Standar toleransi cacat permukaan burr maksimal 0.05 mm sesuai SOP-PRD-102."
-            className="w-full border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
+            className="w-full border border-slate-300 rounded-lg p-3 text-sm text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
           />
         </div>
 
@@ -133,7 +133,7 @@ export const Step1Editor: React.FC<Step1EditorProps> = ({ data, onChange }) => {
             value={data.currentSituation || ""}
             onChange={(e) => handleTextChange("currentSituation", e.target.value)}
             placeholder="Contoh: Ditemukan burr setinggi 0.25 mm pada 15% hasil produksi Line Stamping 2."
-            className="w-full border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
+            className="w-full border border-slate-300 rounded-lg p-3 text-sm text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
           />
         </div>
 
@@ -150,7 +150,7 @@ export const Step1Editor: React.FC<Step1EditorProps> = ({ data, onChange }) => {
             value={data.gap || ""}
             onChange={(e) => handleTextChange("gap", e.target.value)}
             placeholder="Contoh: Terdapat gap ketebalan burr sebesar 0.20 mm berlebih dari batas standar."
-            className="w-full border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
+            className="w-full border border-slate-300 rounded-lg p-3 text-sm text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
           />
         </div>
 
@@ -167,7 +167,7 @@ export const Step1Editor: React.FC<Step1EditorProps> = ({ data, onChange }) => {
             value={data.sinceWhen || ""}
             onChange={(e) => handleTextChange("sinceWhen", e.target.value)}
             placeholder="Contoh: Terjadi sejak penggantian pisau punching tanggal 12 Oktober (frekuensi 3x per shift)."
-            className="w-full border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
+            className="w-full border border-slate-300 rounded-lg p-3 text-sm text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
           />
         </div>
 
@@ -184,7 +184,7 @@ export const Step1Editor: React.FC<Step1EditorProps> = ({ data, onChange }) => {
             value={data.impact || ""}
             onChange={(e) => handleTextChange("impact", e.target.value)}
             placeholder="Contoh: Mengakibatkan claim konsumen, biaya deburring manual sebesar Rp 12 Juta/bulan, serta penundaan pengiriman 2 hari."
-            className="w-full border border-slate-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
+            className="w-full border border-slate-300 rounded-lg p-3 text-sm text-slate-900 bg-white placeholder:text-slate-400 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:outline-none"
           />
         </div>
       </div>

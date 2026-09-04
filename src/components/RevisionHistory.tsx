@@ -34,18 +34,17 @@ const TRIGGER_LABELS: Record<string, { label: string; icon: React.ReactNode; col
   status_changed: {
     label: "Status Diubah",
     icon: <ArrowUpRight className="w-3.5 h-3.5" />,
-    color: "text-indigo-700 bg-indigo-50 border-indigo-200",
+    color: "text-[#5fe8d8] bg-[#16304f] border-[#1fb6a8]/40",
   },
-  // Legacy triggers kept for backward compatibility with existing data
   status_under_review: {
     label: "Status → Under Review",
     icon: <Send className="w-3.5 h-3.5" />,
-    color: "text-amber-700 bg-amber-50 border-amber-200",
+    color: "text-[#f0d68a] bg-[#16304f] border-[#d4a94c]/40",
   },
   status_completed: {
     label: "Status → Completed",
     icon: <CheckCircle className="w-3.5 h-3.5" />,
-    color: "text-emerald-700 bg-emerald-50 border-emerald-200",
+    color: "text-emerald-300 bg-[#16304f] border-emerald-500/40",
   },
 };
 
@@ -138,14 +137,14 @@ export const RevisionHistory: React.FC<RevisionHistoryProps> = ({ projectId, pro
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-md border border-slate-200 p-5">
+    <div className="bg-[#101f36] rounded-2xl shadow-xl border border-[#8fa3bd]/16 p-5 text-white">
       <button
         onClick={() => { setIsOpen(!isOpen); if (!isOpen) fetchRevisions(); }}
-        className="flex items-center gap-2 text-sm font-bold text-slate-700 hover:text-indigo-700 cursor-pointer w-full text-left"
+        className="flex items-center gap-2 text-sm font-bold text-slate-200 hover:text-[#5fe8d8] cursor-pointer w-full text-left font-body"
       >
-        <History className="w-5 h-5 text-indigo-600" />
+        <History className="w-5 h-5 text-[#1fb6a8]" />
         Riwayat Revisi & Snapshot Versi
-        <span className="text-xs font-normal text-slate-500 ml-auto flex items-center gap-1">
+        <span className="text-xs font-normal text-[#8fa3bd] ml-auto flex items-center gap-1">
           {revisions.length} revisi
           {isOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
         </span>

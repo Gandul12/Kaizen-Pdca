@@ -24,8 +24,10 @@
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "recharts": "^3.9.2",
+    "swr": "^2.4.2",
     "tailwind-merge": "^3.6.0",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "pptxgenjs": "^4.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.1.17",

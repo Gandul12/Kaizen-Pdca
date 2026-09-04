@@ -27,51 +27,54 @@ export const HeaderCard: React.FC<HeaderCardProps> = ({
   const getStatusBadgeClass = (s: ProjectStatus) => {
     switch (s) {
       case "Completed":
-        return "bg-emerald-100 text-emerald-800 border-emerald-300";
+        return "bg-[#d4a94c]/15 text-[#f0d68a] border-[#d4a94c]/40";
       case "On Progress":
-        return "bg-blue-100 text-blue-800 border-blue-300";
+        return "bg-[#1fb6a8]/15 text-[#5fe8d8] border-[#1fb6a8]/40";
       case "Under Review":
-        return "bg-amber-100 text-amber-800 border-amber-300";
+        return "bg-[#d4a94c]/15 text-[#d4a94c] border-[#d4a94c]/40";
       case "Rejected":
-        return "bg-rose-100 text-rose-800 border-rose-300";
+        return "bg-rose-500/15 text-rose-300 border-rose-500/40";
       default:
-        return "bg-slate-100 text-slate-800 border-slate-300";
+        return "bg-[#16304f] text-[#8fa3bd] border-[#8fa3bd]/30";
     }
   };
 
   return (
-    <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 text-white rounded-xl shadow-xl p-5 border border-slate-700/50 mb-6">
-      <div className="flex flex-wrap items-center justify-between gap-4 mb-4 pb-3 border-b border-slate-700/60">
+    <div className="bg-[#101f36] text-white rounded-2xl shadow-2xl p-5 border border-[#8fa3bd]/16 mb-6 relative overflow-hidden">
+      {/* Top gradient accent line */}
+      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#1fb6a8] via-[#5fe8d8] to-[#d4a94c]" />
+
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-4 pb-3 border-b border-[#8fa3bd]/15">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-indigo-600/80 rounded-lg shadow-inner text-white">
-            <FileText className="w-6 h-6" />
+          <div className="p-2.5 bg-[#16304f] border border-[#d4a94c]/30 rounded-xl text-[#f0d68a] shadow-inner">
+            <FileText className="w-5 h-5" />
           </div>
           <div>
-            <span className="text-xs font-semibold uppercase tracking-wider text-indigo-300">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#8fa3bd] block">
               HEADER PROYEK IMPROVEMENT / KAIZEN
             </span>
-            <h1 className="text-xl font-bold text-white tracking-tight">
+            <h1 className="font-display text-xl sm:text-2xl font-black text-white tracking-wide">
               {header.title || "Formulir Dokumentasi Kaizen 8 Langkah"}
             </h1>
           </div>
         </div>
 
         <div className="flex items-center gap-3">
-          <label className="text-xs text-slate-300 font-medium flex items-center gap-1">
-            <Activity className="w-3.5 h-3.5" /> Status:
+          <label className="text-xs text-[#8fa3bd] font-medium flex items-center gap-1">
+            <Activity className="w-3.5 h-3.5 text-[#1fb6a8]" /> Status:
           </label>
           {isReadOnly ? (
-            <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusBadgeClass(header.status)}`}>
+            <span className={`px-3 py-1 rounded-full text-xs font-bold border ${getStatusBadgeClass(header.status)}`}>
               {header.status}
             </span>
           ) : (
             <select
               value={header.status}
               onChange={(e) => handleChange("status", e.target.value as ProjectStatus)}
-              className="bg-slate-800 border border-slate-600 text-white text-xs rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 px-3 py-1.5 font-medium cursor-pointer"
+              className="bg-[#16304f] border border-[#8fa3bd]/30 text-white text-xs rounded-xl focus:ring-2 focus:ring-[#1fb6a8] px-3 py-1.5 font-bold cursor-pointer"
             >
               {statusOptions.map((opt) => (
-                <option key={opt} value={opt} className="bg-slate-800 text-white">
+                <option key={opt} value={opt} className="bg-[#0d1b30] text-white">
                   {opt}
                 </option>
               ))}
@@ -83,11 +86,11 @@ export const HeaderCard: React.FC<HeaderCardProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {/* Tema Proyek */}
         <div className="lg:col-span-3">
-          <label className="block text-xs font-semibold text-slate-300 mb-1">
-            Tema Proyek Kaizen <span className="text-indigo-400">*</span>
+          <label className="block text-xs font-bold text-[#8fa3bd] uppercase tracking-wider mb-1">
+            Tema Proyek Kaizen <span className="text-[#1fb6a8]">*</span>
           </label>
           {isReadOnly ? (
-            <p className="text-sm font-semibold text-white bg-slate-800/80 p-2.5 rounded-lg border border-slate-700">
+            <p className="text-sm font-semibold text-white bg-[#16304f] p-2.5 rounded-xl border border-[#8fa3bd]/20">
               {header.title || "-"}
             </p>
           ) : (
@@ -96,19 +99,19 @@ export const HeaderCard: React.FC<HeaderCardProps> = ({
               value={header.title}
               onChange={(e) => handleChange("title", e.target.value)}
               placeholder="Contoh: Menurunkan Reject Burr pada Process Stamping Line 2 Sebesar 50%"
-              className="w-full bg-slate-800/90 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full bg-[#16304f] border border-[#8fa3bd]/30 rounded-xl px-3.5 py-2 text-sm text-white placeholder-[#8fa3bd]/50 focus:outline-none focus:ring-2 focus:ring-[#1fb6a8]"
             />
           )}
         </div>
 
         {/* Departemen / Area */}
         <div>
-          <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
-            <Building2 className="w-3.5 h-3.5 text-indigo-400" />
+          <label className="block text-xs font-bold text-[#8fa3bd] uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            <Building2 className="w-3.5 h-3.5 text-[#1fb6a8]" />
             Departemen / Area
           </label>
           {isReadOnly ? (
-            <p className="text-sm text-slate-200 bg-slate-800/80 p-2 rounded border border-slate-700">
+            <p className="text-sm text-slate-200 bg-[#16304f] p-2 rounded-xl border border-[#8fa3bd]/20">
               {header.department || "-"}
             </p>
           ) : (
@@ -116,20 +119,20 @@ export const HeaderCard: React.FC<HeaderCardProps> = ({
               type="text"
               value={header.department}
               onChange={(e) => handleChange("department", e.target.value)}
-              placeholder="e.g. Produksi, QC, Maintenance, Machining"
-              className="w-full bg-slate-800/90 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              placeholder="Produksi, QC, Maintenance"
+              className="w-full bg-[#16304f] border border-[#8fa3bd]/30 rounded-xl px-3 py-1.5 text-xs text-white placeholder-[#8fa3bd]/50 focus:outline-none focus:ring-2 focus:ring-[#1fb6a8]"
             />
           )}
         </div>
 
         {/* Ketua Tim (PIC) */}
         <div>
-          <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
-            <User className="w-3.5 h-3.5 text-indigo-400" />
+          <label className="block text-xs font-bold text-[#8fa3bd] uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            <User className="w-3.5 h-3.5 text-[#1fb6a8]" />
             Ketua Tim (PIC Utama)
           </label>
           {isReadOnly ? (
-            <p className="text-sm text-slate-200 bg-slate-800/80 p-2 rounded border border-slate-700">
+            <p className="text-sm text-slate-200 bg-[#16304f] p-2 rounded-xl border border-[#8fa3bd]/20">
               {header.leader || "-"}
             </p>
           ) : (
@@ -138,19 +141,19 @@ export const HeaderCard: React.FC<HeaderCardProps> = ({
               value={header.leader}
               onChange={(e) => handleChange("leader", e.target.value)}
               placeholder="Nama Leader / Supervisor"
-              className="w-full bg-slate-800/90 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full bg-[#16304f] border border-[#8fa3bd]/30 rounded-xl px-3 py-1.5 text-xs text-white placeholder-[#8fa3bd]/50 focus:outline-none focus:ring-2 focus:ring-[#1fb6a8]"
             />
           )}
         </div>
 
         {/* Anggota Tim */}
         <div>
-          <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
-            <Users className="w-3.5 h-3.5 text-indigo-400" />
+          <label className="block text-xs font-bold text-[#8fa3bd] uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            <Users className="w-3.5 h-3.5 text-[#1fb6a8]" />
             Anggota Tim
           </label>
           {isReadOnly ? (
-            <p className="text-sm text-slate-200 bg-slate-800/80 p-2 rounded border border-slate-700">
+            <p className="text-sm text-slate-200 bg-[#16304f] p-2 rounded-xl border border-[#8fa3bd]/20">
               {header.teamMembers || "-"}
             </p>
           ) : (
@@ -159,19 +162,19 @@ export const HeaderCard: React.FC<HeaderCardProps> = ({
               value={header.teamMembers}
               onChange={(e) => handleChange("teamMembers", e.target.value)}
               placeholder="Budi, Agus, Siti, Joko"
-              className="w-full bg-slate-800/90 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full bg-[#16304f] border border-[#8fa3bd]/30 rounded-xl px-3 py-1.5 text-xs text-white placeholder-[#8fa3bd]/50 focus:outline-none focus:ring-2 focus:ring-[#1fb6a8]"
             />
           )}
         </div>
 
         {/* Tanggal Mulai */}
         <div>
-          <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
-            <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+          <label className="block text-xs font-bold text-[#8fa3bd] uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            <Calendar className="w-3.5 h-3.5 text-[#1fb6a8]" />
             Tanggal Mulai
           </label>
           {isReadOnly ? (
-            <p className="text-sm text-slate-200 bg-slate-800/80 p-2 rounded border border-slate-700">
+            <p className="text-sm text-slate-200 bg-[#16304f] p-2 rounded-xl border border-[#8fa3bd]/20">
               {header.startDate || "-"}
             </p>
           ) : (
@@ -179,19 +182,19 @@ export const HeaderCard: React.FC<HeaderCardProps> = ({
               type="date"
               value={header.startDate}
               onChange={(e) => handleChange("startDate", e.target.value)}
-              className="w-full bg-slate-800/90 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full bg-[#16304f] border border-[#8fa3bd]/30 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-[#1fb6a8]"
             />
           )}
         </div>
 
         {/* Target Selesai */}
         <div>
-          <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
-            <Calendar className="w-3.5 h-3.5 text-indigo-400" />
+          <label className="block text-xs font-bold text-[#8fa3bd] uppercase tracking-wider mb-1 flex items-center gap-1.5">
+            <Calendar className="w-3.5 h-3.5 text-[#1fb6a8]" />
             Target Selesai (Due Date)
           </label>
           {isReadOnly ? (
-            <p className="text-sm text-slate-200 bg-slate-800/80 p-2 rounded border border-slate-700">
+            <p className="text-sm text-slate-200 bg-[#16304f] p-2 rounded-xl border border-[#8fa3bd]/20">
               {header.dueDate || "-"}
             </p>
           ) : (
@@ -199,7 +202,7 @@ export const HeaderCard: React.FC<HeaderCardProps> = ({
               type="date"
               value={header.dueDate}
               onChange={(e) => handleChange("dueDate", e.target.value)}
-              className="w-full bg-slate-800/90 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full bg-[#16304f] border border-[#8fa3bd]/30 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-[#1fb6a8]"
             />
           )}
         </div>

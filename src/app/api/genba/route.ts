@@ -1,28 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, ensureSchema } from "@/db";
 import { genbaEntries } from "@/db/schema";
+import { buildEmptyItems } from "@/lib/genbaSchedule";
 import { eq } from "drizzle-orm";
 import crypto from "crypto";
 import { logActivity } from "@/lib/activityLogger";
-import { buildEmptyItems } from "@/lib/genbaSchedule";
-import { verifyGenbaPassword } from "@/lib/genbaAuth";
+import { requireGenbaAuth } from "@/lib/genbaAuth";
 
-// GET /api/genba?date=YYYY-MM-DD
-// Never 404s — if no row exists for the date yet, returns an in-memory empty
-// entry (isNew: true) built from the genba schedule, so the client can render
-// the checklist immediately and only persist it on the first POST.
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// GET ?date=YYYY-MM-DD — cari entry existing, atau bangun entry kosong
+// (belum disimpan ke DB) dari buildEmptyItems() kalau belum ada.
 export async function GET(req: NextRequest) {
-  const authError = verifyGenbaPassword(req);
-  if (authError) return authError;
-
   try {
+    const authError = await requireGenbaAuth(req);
+    if (authError) return authError;
+
     await ensureSchema();
     const { searchParams } = new URL(req.url);
     const date = searchParams.get("date") || "";
 
-    if (!date) {
+    if (!DATE_RE.test(date)) {
       return NextResponse.json(
-        { success: false, error: "Query param 'date' wajib diisi (format YYYY-MM-DD)." },
+        { success: false, error: "Parameter 'date' wajib diisi dengan format YYYY-MM-DD." },
         { status: 400 }
       );
     }
@@ -34,20 +34,18 @@ export async function GET(req: NextRequest) {
       .limit(1);
 
     if (existing.length) {
-      return NextResponse.json({ success: true, data: existing[0] });
+      return NextResponse.json({ success: true, data: existing[0], isNew: false });
     }
 
-    // No row yet for this date — build an empty entry in memory only.
+    // Belum ada entry untuk tanggal ini — tidak pernah 404, kembalikan entry
+    // kosong yang belum disimpan ke DB.
     const emptyEntry = {
-      id: "",
       date,
       leaderName: "",
       lineName: "",
       dailyTarget: "",
       items: await buildEmptyItems(),
       linkedProjectId: null,
-      createdAt: null,
-      updatedAt: null,
     };
 
     return NextResponse.json({ success: true, data: emptyEntry, isNew: true });
@@ -57,35 +55,34 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST /api/genba — upsert by `date` (insert if no row exists for that date,
-// otherwise update the existing row). Body: { date, leaderName, lineName, dailyTarget, items }
+// POST — upsert by date (bukan multi-row per tanggal sama).
 export async function POST(req: NextRequest) {
-  const authError = verifyGenbaPassword(req);
-  if (authError) return authError;
-
   try {
+    const authError = await requireGenbaAuth(req);
+    if (authError) return authError;
+
     await ensureSchema();
     const body = await req.json().catch(() => ({}));
-
     const date = body.date || "";
-    const leaderName = body.leaderName || "";
-    const lineName = body.lineName ?? null;
-    const dailyTarget = body.dailyTarget ?? null;
-    const items = body.items ?? (await buildEmptyItems());
 
-    if (!date) {
+    if (!DATE_RE.test(date)) {
       return NextResponse.json(
-        { success: false, error: "Field 'date' wajib diisi." },
+        { success: false, error: "Field 'date' wajib diisi dengan format YYYY-MM-DD." },
         { status: 400 }
       );
     }
 
+    const leaderName = (body.leaderName || "").trim();
     if (!leaderName) {
       return NextResponse.json(
-        { success: false, error: "Field 'leaderName' wajib diisi." },
+        { success: false, error: "Nama leader wajib diisi." },
         { status: 400 }
       );
     }
+
+    const lineName = body.lineName ?? null;
+    const dailyTarget = body.dailyTarget ?? null;
+    const items = Array.isArray(body.items) ? body.items : await buildEmptyItems();
 
     const existing = await db
       .select()
@@ -93,51 +90,53 @@ export async function POST(req: NextRequest) {
       .where(eq(genbaEntries.date, date))
       .limit(1);
 
-    let savedId: string;
-
+    let saved;
     if (existing.length) {
-      // Update the existing row for this date.
-      savedId = existing[0].id;
-      await db
-        .update(genbaEntries)
-        .set({
-          leaderName,
-          lineName,
-          dailyTarget,
-          items,
-          updatedAt: new Date(),
-        })
-        .where(eq(genbaEntries.id, savedId));
+      const id = existing[0].id;
+      const updateData: any = {
+        leaderName,
+        lineName,
+        dailyTarget,
+        items,
+        updatedAt: new Date(),
+      };
+      if (body.linkedProjectId !== undefined) {
+        updateData.linkedProjectId = body.linkedProjectId;
+      }
+      if (body.linkedProjectShareToken !== undefined) {
+        updateData.linkedProjectShareToken = body.linkedProjectShareToken;
+      }
+
+      await db.update(genbaEntries).set(updateData).where(eq(genbaEntries.id, id));
+      const updated = await db.select().from(genbaEntries).where(eq(genbaEntries.id, id)).limit(1);
+      saved = updated[0];
     } else {
-      // Insert a new row for this date.
-      savedId = "genba-" + Date.now() + "-" + crypto.randomBytes(4).toString("hex");
-      await db.insert(genbaEntries).values({
-        id: savedId,
+      const id = "genba-" + Date.now() + "-" + crypto.randomBytes(4).toString("hex");
+      const newEntry = {
+        id,
         date,
         leaderName,
         lineName,
         dailyTarget,
         items,
         linkedProjectId: body.linkedProjectId ?? null,
+        linkedProjectShareToken: body.linkedProjectShareToken ?? null,
         createdAt: new Date(),
         updatedAt: new Date(),
-      });
+      };
+      await db.insert(genbaEntries).values(newEntry);
+      saved = newEntry;
     }
 
     await logActivity({
       action: "genba_saved",
-      detail: `Genba entry for ${date} saved by ${leaderName}`,
+      projectId: saved.linkedProjectId || null,
+      detail: `Genba entry ${date} disimpan oleh ${leaderName}`,
       ipAddress: req.headers.get("x-forwarded-for") || "",
       userAgent: req.headers.get("user-agent") || "",
     });
 
-    const saved = await db
-      .select()
-      .from(genbaEntries)
-      .where(eq(genbaEntries.id, savedId))
-      .limit(1);
-
-    return NextResponse.json({ success: true, data: saved[0] });
+    return NextResponse.json({ success: true, data: saved });
   } catch (error: any) {
     console.error("POST /api/genba error:", error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });

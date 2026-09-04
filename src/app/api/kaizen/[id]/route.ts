@@ -3,8 +3,9 @@ import { db, ensureSchema } from "@/db";
 import { kaizenProjects } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import { logActivity } from "@/lib/activityLogger";
-import { verifyPassword } from "@/lib/password";
+import { verifyPassword, timingSafeCompare } from "@/lib/password";
 import { createRevision } from "@/lib/revisionHelper";
+import { readJsonBodyWithLimit, validateKaizenContent } from "@/lib/kaizenContentSchema";
 
 // GET — returns locked status without content (no password in URL)
 export async function GET(
@@ -53,7 +54,19 @@ export async function PUT(
   try {
     await ensureSchema();
     const { id } = await params;
-    const body = await req.json();
+
+    const parsed = await readJsonBodyWithLimit(req);
+    if (!parsed.ok) {
+      return NextResponse.json({ success: false, error: parsed.error }, { status: parsed.status });
+    }
+    const body = parsed.body;
+
+    if (body.content !== undefined) {
+      const contentError = validateKaizenContent(body.content);
+      if (contentError) {
+        return NextResponse.json({ success: false, error: contentError }, { status: 400 });
+      }
+    }
 
     const existing = await db
       .select()
@@ -148,23 +161,29 @@ export async function DELETE(
       return NextResponse.json({ success: false, error: "Project not found" }, { status: 404 });
     }
 
-    // Password sent in body (DELETE can have body)
     let inputPassword = "";
+    let adminPassword = "";
     try {
       const body = await req.json();
       inputPassword = body.projectPassword || "";
+      adminPassword = body.adminPassword || "";
     } catch {
       // no body
     }
 
-    const storedHash = existing[0].projectPassword;
-    if (storedHash) {
-      const valid = await verifyPassword(inputPassword, storedHash);
-      if (!valid) {
-        return NextResponse.json(
-          { success: false, error: "Password proyek tidak cocok. Akses ditolak." },
-          { status: 403 }
-        );
+    const envAdminPw = process.env.ADMIN_PASSWORD || (process.env.NODE_ENV === "production" ? "" : "admin123");
+    const isAdminAuth = adminPassword && envAdminPw && timingSafeCompare(adminPassword, envAdminPw);
+
+    if (!isAdminAuth) {
+      const storedHash = existing[0].projectPassword;
+      if (storedHash) {
+        const valid = await verifyPassword(inputPassword, storedHash);
+        if (!valid) {
+          return NextResponse.json(
+            { success: false, error: "Password proyek atau password admin tidak cocok. Akses ditolak." },
+            { status: 403 }
+          );
+        }
       }
     }
 
